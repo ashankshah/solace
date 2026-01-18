@@ -1,33 +1,46 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  getClinicByIdForUser,
   getClinicById,
   getSubmissionsByClinic,
   createSubmission,
 } from "@/lib/dataStore";
+import { auth } from "@/lib/auth";
 
-// GET /api/clinics/[clinicId]/submissions - Get all submissions for a clinic
+// GET /api/clinics/[clinicId]/submissions - Get all submissions for a clinic (auth required)
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ clinicId: string }> }
 ) {
-  const { clinicId } = await params;
-  const clinic = getClinicById(clinicId);
+  try {
+    const session = await auth();
+    
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-  if (!clinic) {
-    return NextResponse.json({ error: "Clinic not found" }, { status: 404 });
+    const { clinicId } = await params;
+    const clinic = getClinicByIdForUser(clinicId, session.user.id);
+
+    if (!clinic) {
+      return NextResponse.json({ error: "Clinic not found" }, { status: 404 });
+    }
+
+    const submissions = getSubmissionsByClinic(clinicId);
+
+    // Sort by most recent first
+    const sorted = [...submissions].sort(
+      (a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
+    );
+
+    return NextResponse.json(sorted);
+  } catch (error) {
+    console.error("Get submissions error:", error);
+    return NextResponse.json({ error: "Failed to fetch submissions" }, { status: 500 });
   }
-
-  const submissions = getSubmissionsByClinic(clinicId);
-
-  // Sort by most recent first
-  const sorted = [...submissions].sort(
-    (a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
-  );
-
-  return NextResponse.json(sorted);
 }
 
-// POST /api/clinics/[clinicId]/submissions - Create a new patient submission
+// POST /api/clinics/[clinicId]/submissions - Create a new patient submission (public - for patients)
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ clinicId: string }> }
@@ -35,6 +48,8 @@ export async function POST(
   const { clinicId } = await params;
 
   try {
+    // Note: This is public - patients don't need to be authenticated
+    // But the clinic must exist
     const clinic = getClinicById(clinicId);
 
     if (!clinic) {
@@ -66,7 +81,8 @@ export async function POST(
     );
 
     return NextResponse.json(submission, { status: 201 });
-  } catch {
+  } catch (error) {
+    console.error("Create submission error:", error);
     return NextResponse.json(
       { error: "Failed to create submission" },
       { status: 500 }

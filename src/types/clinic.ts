@@ -4,6 +4,7 @@ import type { Question, AnswerRecord } from "./intake";
 
 export interface Clinic {
   id: string;
+  userId: string; // Owner of the clinic
   name: string;
   address?: string;
   createdAt: Date;

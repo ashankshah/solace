@@ -1,9 +1,42 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useSession, signOut } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import type { ClinicWithStats, PatientSubmission } from "@/types/clinic";
+import type { ClinicLayout } from "@/types/layout";
+import { formatDate } from "@/lib/utils";
+import { createEmptyLayout } from "@/types/layout";
+import { LayoutViewer } from "@/components/LayoutViewer";
+import {
+  Button,
+  Card,
+  CardHeader,
+  CardTitle,
+  CardContent,
+  Modal,
+  ModalFooter,
+  Input,
+  PageLoader,
+  Spinner,
+  EmptyState,
+  UsersIcon,
+  DocumentIcon,
+  BuildingIcon,
+  Badge,
+  StatusBadge,
+  Header,
+  HeaderBranding,
+  PlusIcon,
+  RefreshIcon,
+  CopyIcon,
+  CheckIcon,
+  ExternalLinkIcon,
+} from "@/components/ui";
 
 export default function DashboardPage() {
+  const { data: session, status } = useSession();
+  const router = useRouter();
   const [clinics, setClinics] = useState<ClinicWithStats[]>([]);
   const [selectedClinic, setSelectedClinic] = useState<ClinicWithStats | null>(null);
   const [submissions, setSubmissions] = useState<PatientSubmission[]>([]);
@@ -14,11 +47,23 @@ export default function DashboardPage() {
   const [newClinicName, setNewClinicName] = useState("");
   const [newClinicAddress, setNewClinicAddress] = useState("");
   const [showLinkCopied, setShowLinkCopied] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
+  const [clinicLayout, setClinicLayout] = useState<ClinicLayout>(createEmptyLayout());
+
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (status === "unauthenticated") {
+      router.push("/login");
+    }
+  }, [status, router]);
 
   // Fetch clinics on mount
   useEffect(() => {
-    fetchClinics();
-  }, []);
+    if (status === "authenticated") {
+      fetchClinics();
+      fetchLayout();
+    }
+  }, [status]);
 
   const fetchClinics = async () => {
     try {
@@ -32,6 +77,22 @@ export default function DashboardPage() {
       console.error("Failed to fetch clinics:", err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchLayout = async () => {
+    try {
+      const res = await fetch("/api/layout");
+      if (res.ok) {
+        const data = await res.json();
+        setClinicLayout({
+          ...data,
+          createdAt: new Date(data.createdAt),
+          updatedAt: new Date(data.updatedAt),
+        });
+      }
+    } catch (err) {
+      console.error("Failed to fetch layout:", err);
     }
   };
 
@@ -74,13 +135,17 @@ export default function DashboardPage() {
         const newClinic = await res.json();
         setClinics((prev) => [...prev, { ...newClinic, patientCount: 0, pendingCount: 0 }]);
         setSelectedClinic({ ...newClinic, patientCount: 0, pendingCount: 0 });
-        setNewClinicName("");
-        setNewClinicAddress("");
-        setShowNewClinicModal(false);
+        handleCloseModal();
       }
     } catch (err) {
       console.error("Failed to create clinic:", err);
     }
+  };
+
+  const handleCloseModal = () => {
+    setShowNewClinicModal(false);
+    setNewClinicName("");
+    setNewClinicAddress("");
   };
 
   const copyCheckInLink = () => {
@@ -95,28 +160,6 @@ export default function DashboardPage() {
     if (!selectedClinic) return;
     const link = `${window.location.origin}/checkin/${selectedClinic.id}`;
     window.open(link, "_blank");
-  };
-
-  const formatDate = (date: Date | string) => {
-    return new Date(date).toLocaleString("en-US", {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "pending":
-        return "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400";
-      case "reviewed":
-        return "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400";
-      case "archived":
-        return "bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-500";
-      default:
-        return "bg-neutral-100 text-neutral-500";
-    }
   };
 
   const updateSubmissionStatus = async (submissionId: string, status: string) => {
@@ -143,63 +186,117 @@ export default function DashboardPage() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-neutral-50 dark:bg-neutral-900 flex items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-neutral-200 border-t-neutral-900 dark:border-neutral-700 dark:border-t-neutral-100" />
-      </div>
-    );
+  if (loading || status === "loading") {
+    return <PageLoader label="Loading clinics..." />;
   }
 
+  if (status === "unauthenticated") {
+    return <PageLoader label="Redirecting to login..." />;
+  }
+
+  const handleSignOut = async () => {
+    await signOut({ callbackUrl: "/login" });
+  };
+
   return (
-    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-900">
+    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950">
       {/* Header */}
-      <header className="border-b border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-900 dark:bg-neutral-100">
-              <svg className="h-4 w-4 text-white dark:text-neutral-900" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-              </svg>
-            </div>
-            <span className="text-base font-semibold text-neutral-900 dark:text-neutral-100">Solace</span>
-            <span className="mx-2 text-neutral-300 dark:text-neutral-600">·</span>
-            <span className="text-sm text-neutral-500 dark:text-neutral-400">Clinical Dashboard</span>
-          </div>
-          <button
-            onClick={() => setShowNewClinicModal(true)}
-            className="flex items-center gap-2 rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
-          >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-            </svg>
+      <Header>
+        <HeaderBranding subtitle="Clinical Dashboard" />
+        <div className="flex items-center gap-4">
+          <Button onClick={() => setShowNewClinicModal(true)} leftIcon={<PlusIcon />}>
             Add Clinic
-          </button>
+          </Button>
+          
+          {/* User Menu */}
+          <div className="relative">
+            <button
+              onClick={() => setShowUserMenu(!showUserMenu)}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
+            >
+              <div className="w-8 h-8 rounded-full bg-accent-100 dark:bg-accent-900/30 flex items-center justify-center">
+                <span className="text-accent-600 dark:text-accent-400 font-semibold text-sm">
+                  {session?.user?.name?.charAt(0).toUpperCase() || "U"}
+                </span>
+              </div>
+              <span className="hidden sm:block max-w-[120px] truncate">
+                {session?.user?.name || "User"}
+              </span>
+              <svg className="w-4 h-4 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            
+            {showUserMenu && (
+              <>
+                <div 
+                  className="fixed inset-0 z-40" 
+                  onClick={() => setShowUserMenu(false)}
+                />
+                <div className="absolute right-0 mt-2 w-56 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-lg z-50 overflow-hidden">
+                  <div className="px-4 py-3 border-b border-neutral-100 dark:border-neutral-800">
+                    <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100 truncate">
+                      {session?.user?.name}
+                    </p>
+                    <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate">
+                      {session?.user?.email}
+                    </p>
+                  </div>
+                  <div className="py-1">
+                    <button
+                      onClick={() => {
+                        setShowUserMenu(false);
+                        router.push("/settings");
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors flex items-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                      Account Settings
+                    </button>
+                    <button
+                      onClick={handleSignOut}
+                      className="w-full text-left px-4 py-2 text-sm text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors flex items-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                      </svg>
+                      Sign out
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </div>
-      </header>
+      </Header>
 
       <div className="mx-auto max-w-7xl px-6 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           {/* Clinic Selector */}
           <div className="lg:col-span-1">
-            <div className="rounded-lg border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900 overflow-hidden">
-              <div className="p-4 border-b border-neutral-200 dark:border-neutral-800">
-                <h2 className="text-sm font-medium text-neutral-900 dark:text-neutral-100 tracking-wide uppercase">
-                  Clinics
-                </h2>
-              </div>
-              <div className="divide-y divide-neutral-200 dark:divide-neutral-800">
+            <Card padding="none" className="overflow-hidden">
+              <CardHeader>
+                <CardTitle>Clinics</CardTitle>
+              </CardHeader>
+              <div className="divide-y divide-neutral-100 dark:divide-neutral-800">
                 {clinics.map((clinic) => (
                   <button
                     key={clinic.id}
                     onClick={() => setSelectedClinic(clinic)}
-                    className={`w-full p-4 text-left transition-colors ${
+                    className={`w-full px-5 py-4 text-left transition-all duration-150 ${
                       selectedClinic?.id === clinic.id
-                        ? "bg-neutral-100 dark:bg-neutral-800"
-                        : "hover:bg-neutral-50 dark:hover:bg-neutral-850"
+                        ? "bg-accent-50 border-l-[3px] border-l-accent-500 dark:bg-accent-500/10"
+                        : "border-l-[3px] border-l-transparent hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
                     }`}
                   >
-                    <p className="font-medium text-neutral-900 dark:text-neutral-100 text-sm">
+                    <p className={`font-medium text-sm ${
+                      selectedClinic?.id === clinic.id 
+                        ? "text-accent-700 dark:text-accent-400" 
+                        : "text-neutral-900 dark:text-neutral-100"
+                    }`}>
                       {clinic.name}
                     </p>
                     <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
@@ -208,12 +305,14 @@ export default function DashboardPage() {
                   </button>
                 ))}
                 {clinics.length === 0 && (
-                  <p className="p-4 text-sm text-neutral-500 dark:text-neutral-400">
-                    No clinics yet. Create one to get started.
-                  </p>
+                  <EmptyState
+                    size="sm"
+                    title="No clinics yet"
+                    description="Create one to get started"
+                  />
                 )}
               </div>
-            </div>
+            </Card>
           </div>
 
           {/* Main Content */}
@@ -221,10 +320,10 @@ export default function DashboardPage() {
             {selectedClinic ? (
               <div className="space-y-6">
                 {/* Clinic Header with Check-in Link */}
-                <div className="rounded-lg border border-neutral-200 bg-white p-6 dark:border-neutral-800 dark:bg-neutral-900">
+                <Card>
                   <div className="flex items-start justify-between">
                     <div>
-                      <h1 className="text-xl font-semibold text-neutral-900 dark:text-neutral-100">
+                      <h1 className="text-xl font-semibold text-neutral-900 dark:text-neutral-100 tracking-tight">
                         {selectedClinic.name}
                       </h1>
                       {selectedClinic.address && (
@@ -233,152 +332,126 @@ export default function DashboardPage() {
                         </p>
                       )}
                     </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={fetchSubmissions}
-                        className="rounded-lg border border-neutral-200 px-3 py-2 text-sm font-medium text-neutral-700 transition-colors hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
-                        title="Refresh"
-                      >
-                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                        </svg>
-                      </button>
-                    </div>
+                    <Button variant="ghost" size="sm" onClick={fetchSubmissions} title="Refresh">
+                      <RefreshIcon />
+                    </Button>
                   </div>
 
                   {/* Check-in Link Section */}
-                  <div className="mt-6 p-4 rounded-lg bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700">
-                    <div className="flex items-center justify-between">
-                      <div>
+                  <div className="mt-6 p-4 rounded-xl bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-100 dark:border-neutral-700/50">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
                           Patient Check-in Link
                         </p>
-                        <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1 font-mono">
+                        <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1 font-mono truncate">
                           {typeof window !== "undefined" ? `${window.location.origin}/checkin/${selectedClinic.id}` : `/checkin/${selectedClinic.id}`}
                         </p>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={copyCheckInLink}
-                          className="flex items-center gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm font-medium text-neutral-700 transition-colors hover:bg-neutral-50 dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-600"
-                        >
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Button variant="ghost" size="sm" onClick={copyCheckInLink}>
                           {showLinkCopied ? (
                             <>
-                              <svg className="h-4 w-4 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                              </svg>
+                              <CheckIcon />
                               Copied!
                             </>
                           ) : (
                             <>
-                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                              </svg>
+                              <CopyIcon />
                               Copy
                             </>
                           )}
-                        </button>
-                        <button
-                          onClick={openCheckInLink}
-                          className="flex items-center gap-2 rounded-lg bg-neutral-900 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
-                        >
-                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                          </svg>
+                        </Button>
+                        <Button size="sm" onClick={openCheckInLink} leftIcon={<ExternalLinkIcon />}>
                           Open
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   </div>
-                </div>
+                </Card>
 
                 {/* Patient Submissions Grid */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {/* Patient List */}
-                  <div className="rounded-lg border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900 overflow-hidden">
-                    <div className="p-4 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
-                      <h2 className="text-sm font-medium text-neutral-900 dark:text-neutral-100 tracking-wide uppercase">
-                        Patient Check-ins
-                      </h2>
-                      <span className="text-xs text-neutral-500 dark:text-neutral-400">
-                        {submissions.length} total
-                      </span>
-                    </div>
+                  <Card padding="none" className="overflow-hidden">
+                    <CardHeader className="flex items-center justify-between">
+                      <CardTitle>Patient Check-ins</CardTitle>
+                      <Badge variant="secondary" size="sm">{submissions.length}</Badge>
+                    </CardHeader>
                     
                     {submissionsLoading ? (
-                      <div className="p-8 flex justify-center">
-                        <div className="h-6 w-6 animate-spin rounded-full border-2 border-neutral-200 border-t-neutral-900 dark:border-neutral-700 dark:border-t-neutral-100" />
+                      <div className="p-8">
+                        <Spinner size="sm" label="Loading patients..." />
                       </div>
                     ) : submissions.length === 0 ? (
-                      <div className="p-8 text-center">
-                        <p className="text-sm text-neutral-500 dark:text-neutral-400">
-                          No patient check-ins yet.
-                        </p>
-                        <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-2">
-                          Share the check-in link with patients to get started.
-                        </p>
-                      </div>
+                      <EmptyState
+                        icon={<UsersIcon className="h-full w-full" />}
+                        title="No patient check-ins yet"
+                        description="Share the check-in link to get started"
+                      />
                     ) : (
-                      <div className="divide-y divide-neutral-200 dark:divide-neutral-800 max-h-96 overflow-y-auto">
+                      <div className="divide-y divide-neutral-100 dark:divide-neutral-800 max-h-96 overflow-y-auto">
                         {submissions.map((submission) => (
                           <button
                             key={submission.id}
                             onClick={() => setSelectedSubmission(submission)}
-                            className={`w-full p-4 text-left transition-colors ${
+                            className={`w-full px-5 py-4 text-left transition-all duration-150 ${
                               selectedSubmission?.id === submission.id
-                                ? "bg-neutral-100 dark:bg-neutral-800"
-                                : "hover:bg-neutral-50 dark:hover:bg-neutral-850"
+                                ? "bg-accent-50 border-l-[3px] border-l-accent-500 dark:bg-accent-500/10"
+                                : "border-l-[3px] border-l-transparent hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
                             }`}
                           >
-                            <div className="flex items-start justify-between">
-                              <div>
-                                <p className="font-medium text-neutral-900 dark:text-neutral-100 text-sm">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <p className={`font-medium text-sm truncate ${
+                                  selectedSubmission?.id === submission.id 
+                                    ? "text-accent-700 dark:text-accent-400" 
+                                    : "text-neutral-900 dark:text-neutral-100"
+                                }`}>
                                   {submission.patientName}
                                 </p>
                                 <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
                                   {formatDate(submission.submittedAt)}
                                 </p>
                               </div>
-                              <span className={`text-xs font-medium px-2 py-1 rounded-full ${getStatusColor(submission.status)}`}>
-                                {submission.status}
-                              </span>
+                              <StatusBadge status={submission.status as "pending" | "reviewed" | "archived"} />
                             </div>
                           </button>
                         ))}
                       </div>
                     )}
-                  </div>
+                  </Card>
 
                   {/* Submission Detail */}
-                  <div className="rounded-lg border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900 overflow-hidden">
-                    <div className="p-4 border-b border-neutral-200 dark:border-neutral-800">
-                      <h2 className="text-sm font-medium text-neutral-900 dark:text-neutral-100 tracking-wide uppercase">
-                        {selectedSubmission ? "Form Responses" : "Select a Patient"}
-                      </h2>
-                    </div>
+                  <Card padding="none" className="overflow-hidden">
+                    <CardHeader>
+                      <CardTitle>
+                        {selectedSubmission ? "Patient Details" : "Select a Patient"}
+                      </CardTitle>
+                    </CardHeader>
                     
                     {selectedSubmission ? (
-                      <div className="p-4">
+                      <CardContent>
                         {/* Patient Info */}
-                        <div className="mb-4 pb-4 border-b border-neutral-200 dark:border-neutral-700">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <p className="font-semibold text-neutral-900 dark:text-neutral-100">
+                        <div className="mb-5 pb-5 border-b border-neutral-100 dark:border-neutral-800">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <p className="font-semibold text-neutral-900 dark:text-neutral-100 text-base">
                                 {selectedSubmission.patientName}
                               </p>
                               {selectedSubmission.patientEmail && (
-                                <p className="text-sm text-neutral-500 dark:text-neutral-400">
+                                <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-0.5 truncate">
                                   {selectedSubmission.patientEmail}
                                 </p>
                               )}
-                              <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-1">
+                              <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-2">
                                 Submitted {formatDate(selectedSubmission.submittedAt)}
                               </p>
                             </div>
                             <select
                               value={selectedSubmission.status}
                               onChange={(e) => updateSubmissionStatus(selectedSubmission.id, e.target.value)}
-                              className={`text-xs font-medium px-2 py-1 rounded-lg border-0 ${getStatusColor(selectedSubmission.status)} cursor-pointer`}
+                              className="text-xs font-medium px-3 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 cursor-pointer focus:ring-2 focus:ring-accent-500 focus:ring-offset-1 bg-white dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300"
                             >
                               <option value="pending">pending</option>
                               <option value="reviewed">reviewed</option>
@@ -388,19 +461,19 @@ export default function DashboardPage() {
                         </div>
 
                         {/* Responses */}
-                        <div className="space-y-4 max-h-80 overflow-y-auto">
+                        <div className="space-y-4 max-h-80 overflow-y-auto pr-1">
                           {selectedSubmission.questions.length > 0 ? (
                             selectedSubmission.questions.map((question, index) => {
                               const answer = selectedSubmission.answers[question.id];
                               return (
-                                <div key={question.id} className="text-sm">
-                                  <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-1 uppercase tracking-wide">
+                                <div key={question.id} className="group">
+                                  <p className="text-[10px] text-neutral-400 dark:text-neutral-500 mb-1 uppercase tracking-wider font-medium">
                                     {question.category || `Question ${index + 1}`}
                                   </p>
-                                  <p className="text-neutral-700 dark:text-neutral-300 mb-1">
+                                  <p className="text-sm text-neutral-600 dark:text-neutral-400 mb-1.5 leading-relaxed">
                                     {question.question}
                                   </p>
-                                  <p className="font-medium text-neutral-900 dark:text-neutral-100">
+                                  <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100 bg-neutral-50 dark:bg-neutral-800/50 rounded-lg px-3 py-2">
                                     {answer
                                       ? answer.type === "multiple_choice"
                                         ? answer.selectedValue
@@ -415,11 +488,11 @@ export default function DashboardPage() {
                           ) : (
                             // Fallback: show answers without questions
                             Object.entries(selectedSubmission.answers).map(([questionId, answer]) => (
-                              <div key={questionId} className="text-sm">
-                                <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-1">
+                              <div key={questionId}>
+                                <p className="text-[10px] text-neutral-400 dark:text-neutral-500 mb-1.5 uppercase tracking-wider font-medium">
                                   {questionId.replace(/_/g, " ")}
                                 </p>
-                                <p className="font-medium text-neutral-900 dark:text-neutral-100">
+                                <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100 bg-neutral-50 dark:bg-neutral-800/50 rounded-lg px-3 py-2">
                                   {answer.type === "multiple_choice"
                                     ? answer.selectedValue
                                     : answer.type === "slider"
@@ -430,89 +503,71 @@ export default function DashboardPage() {
                             ))
                           )}
                         </div>
-                      </div>
+                      </CardContent>
                     ) : (
-                      <div className="p-8 text-center">
-                        <p className="text-sm text-neutral-500 dark:text-neutral-400">
-                          Select a patient from the list to view their form responses.
-                        </p>
-                      </div>
+                      <EmptyState
+                        icon={<DocumentIcon className="h-full w-full" />}
+                        title="No patient selected"
+                        description="Select a patient to view their responses"
+                      />
                     )}
-                  </div>
+                  </Card>
                 </div>
               </div>
             ) : (
-              <div className="rounded-lg border border-neutral-200 bg-white p-8 dark:border-neutral-800 dark:bg-neutral-900 text-center">
-                <p className="text-neutral-500 dark:text-neutral-400">
-                  Select a clinic from the sidebar or create a new one.
-                </p>
-              </div>
+              <Card className="text-center p-12">
+                <EmptyState
+                  size="lg"
+                  icon={<BuildingIcon className="h-full w-full" />}
+                  title="Select a clinic to view patients"
+                  description="Or create a new clinic to get started"
+                />
+              </Card>
             )}
           </div>
+        </div>
+
+        {/* Clinic Layout Viewer */}
+        <div className="mt-8">
+          <LayoutViewer
+            layout={clinicLayout}
+            onEditClick={() => router.push("/settings")}
+          />
         </div>
       </div>
 
       {/* New Clinic Modal */}
-      {showNewClinicModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-full max-w-md rounded-lg bg-white p-6 dark:bg-neutral-900 shadow-xl">
-            <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mb-4">
-              Add New Clinic
-            </h2>
-            <form onSubmit={handleCreateClinic} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">
-                  Clinic Name <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={newClinicName}
-                  onChange={(e) => setNewClinicName(e.target.value)}
-                  placeholder="e.g., Solace Medical Center"
-                  required
-                  className="w-full rounded-lg border border-neutral-200 bg-white px-4 py-2.5 text-sm text-neutral-900 placeholder-neutral-400 focus:border-neutral-400 focus:outline-none dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 dark:placeholder-neutral-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">
-                  Address <span className="text-neutral-400">(optional)</span>
-                </label>
-                <input
-                  type="text"
-                  value={newClinicAddress}
-                  onChange={(e) => setNewClinicAddress(e.target.value)}
-                  placeholder="e.g., 123 Main St, City"
-                  className="w-full rounded-lg border border-neutral-200 bg-white px-4 py-2.5 text-sm text-neutral-900 placeholder-neutral-400 focus:border-neutral-400 focus:outline-none dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 dark:placeholder-neutral-500"
-                />
-              </div>
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowNewClinicModal(false);
-                    setNewClinicName("");
-                    setNewClinicAddress("");
-                  }}
-                  className="flex-1 rounded-lg border border-neutral-200 py-2.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={!newClinicName.trim()}
-                  className={`flex-1 rounded-lg py-2.5 text-sm font-medium transition-colors ${
-                    newClinicName.trim()
-                      ? "bg-neutral-900 text-white hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
-                      : "bg-neutral-100 text-neutral-400 cursor-not-allowed dark:bg-neutral-800 dark:text-neutral-600"
-                  }`}
-                >
-                  Create Clinic
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <Modal
+        isOpen={showNewClinicModal}
+        onClose={handleCloseModal}
+        title="Add New Clinic"
+        description="Create a clinic to start receiving patient check-ins."
+      >
+        <form onSubmit={handleCreateClinic} className="space-y-5">
+          <Input
+            label="Clinic Name"
+            value={newClinicName}
+            onChange={(e) => setNewClinicName(e.target.value)}
+            placeholder="e.g., Solace Medical Center"
+            required
+          />
+          <Input
+            label="Address"
+            hint="Optional"
+            value={newClinicAddress}
+            onChange={(e) => setNewClinicAddress(e.target.value)}
+            placeholder="e.g., 123 Main St, City"
+          />
+          <ModalFooter>
+            <Button type="button" variant="ghost" onClick={handleCloseModal}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!newClinicName.trim()}>
+              Create Clinic
+            </Button>
+          </ModalFooter>
+        </form>
+      </Modal>
     </div>
   );
 }
