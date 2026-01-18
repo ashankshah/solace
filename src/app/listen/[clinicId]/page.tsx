@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { useSupabaseAuth } from "@/components/SupabaseAuthProvider";
 import {
@@ -70,7 +70,14 @@ export default function ListenPage() {
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isTranscriptExpanded, setIsTranscriptExpanded] = useState(true);
   const [transcriptionError, setTranscriptionError] = useState<string | null>(null);
+  const [isRefiningNotes, setIsRefiningNotes] = useState(false);
+  const [hasStoppedRecording, setHasStoppedRecording] = useState(false);
+  const [refineMessage, setRefineMessage] = useState<string | null>(null);
   const selectedPatient = patients.find((patient) => patient.id === selectedPatientId);
+  const transcriptText = useMemo(
+    () => transcript.map((segment) => segment.text).join(" ").trim(),
+    [transcript]
+  );
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -229,6 +236,8 @@ export default function ListenPage() {
 
   const startRecording = async () => {
     try {
+      setHasStoppedRecording(false);
+      setRefineMessage(null);
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
@@ -318,6 +327,7 @@ export default function ListenPage() {
 
     setRecordingState("idle");
     setAudioLevel(0);
+    setHasStoppedRecording(true);
 
     // Transcribe any remaining audio
     if (chunksRef.current.length > lastTranscribedIndexRef.current) {
@@ -368,6 +378,52 @@ export default function ListenPage() {
   const copyTranscript = () => {
     const text = transcript.map(s => s.text).join(" ");
     navigator.clipboard.writeText(text);
+  };
+
+  const handleRefineNotes = async () => {
+    if (!selectedPatient) {
+      setRefineMessage("Select a patient to apply the refined notes.");
+      return;
+    }
+    if (!transcriptText) {
+      setRefineMessage("Transcript not ready yet. Please wait a moment and try again.");
+      return;
+    }
+    setIsRefiningNotes(true);
+    setRefineMessage(null);
+
+    try {
+      const response = await fetch(`/api/submissions/${selectedPatient.id}/refine-notes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transcript: transcriptText }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to refine patient notes");
+      }
+
+      const data = await response.json();
+      if (data.summary) {
+        setPatients((prev) =>
+          prev.map((patient) =>
+            patient.id === selectedPatient.id
+              ? { ...patient, summary: data.summary }
+              : patient
+          )
+        );
+      }
+
+      await fetchClinicData();
+
+      setRefineMessage("Patient notes refined using the latest recording.");
+    } catch (error) {
+      console.error("Refine notes error:", error);
+      setRefineMessage(error instanceof Error ? error.message : "Failed to refine patient notes.");
+    } finally {
+      setIsRefiningNotes(false);
+    }
   };
 
   if (authLoading) {
@@ -574,6 +630,32 @@ export default function ListenPage() {
                 ? "Click the button to start recording"
                 : "Click the stop button to end the recording"}
             </p>
+
+            {recordingState === "idle" && hasStoppedRecording && (
+              <div className="mt-6 flex flex-col items-center gap-3">
+                <div className="inline-flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400 bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700 px-3 py-2 rounded-full">
+                  <span className="w-2 h-2 rounded-full bg-error-500" />
+                  Recording stopped. Refine patient notes from this audio.
+                </div>
+                <Button
+                  size="sm"
+                  onClick={handleRefineNotes}
+                  isLoading={isRefiningNotes}
+                >
+                  Refine patient notes
+                </Button>
+                {refineMessage && (
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                    {refineMessage}
+                  </p>
+                )}
+                {!selectedPatient && (
+                  <p className="text-xs text-neutral-400 dark:text-neutral-500">
+                    Select a patient to apply the refined notes.
+                  </p>
+                )}
+              </div>
+            )}
           </Card>
         </div>
 
@@ -584,109 +666,6 @@ export default function ListenPage() {
               {transcriptionError}
             </p>
           </div>
-        )}
-
-        {/* Live Transcript */}
-        {(transcript.length > 0 || recordingState === "recording") && (
-          <Card className="mt-8" padding="none">
-            {/* Header */}
-            <div
-              role="button"
-              tabIndex={0}
-              aria-expanded={isTranscriptExpanded}
-              onClick={() => setIsTranscriptExpanded(!isTranscriptExpanded)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  setIsTranscriptExpanded((prev) => !prev);
-                }
-              }}
-              className="w-full px-6 py-4 flex items-center justify-between hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors cursor-pointer"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-accent-100 dark:bg-accent-900/30 flex items-center justify-center">
-                  <svg className="w-4 h-4 text-accent-600 dark:text-accent-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                </div>
-                <div className="text-left">
-                  <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
-                    Live Transcript
-                  </p>
-                  <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                    {transcript.length} segment{transcript.length !== 1 ? "s" : ""}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                {transcript.length > 0 && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      copyTranscript();
-                    }}
-                    className="p-2 rounded-lg hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-colors"
-                    title="Copy transcript"
-                  >
-                    <svg className="w-4 h-4 text-neutral-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                    </svg>
-                  </button>
-                )}
-                <svg 
-                  className={cn(
-                    "w-5 h-5 text-neutral-400 transition-transform",
-                    isTranscriptExpanded && "rotate-180"
-                  )} 
-                  fill="none" 
-                  viewBox="0 0 24 24" 
-                  stroke="currentColor"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </div>
-            </div>
-
-            {/* Content */}
-            {isTranscriptExpanded && (
-              <div className="border-t border-neutral-100 dark:border-neutral-800">
-                <div className="max-h-64 overflow-y-auto p-6">
-                  {transcript.length === 0 ? (
-                    <div className="text-center py-8">
-                      <p className="text-sm text-neutral-500 dark:text-neutral-400">
-                        {recordingState === "recording" 
-                          ? "Listening... Transcript will appear here"
-                          : "No transcript available"}
-                      </p>
-                      {recordingState === "recording" && (
-                        <div className="mt-3 flex justify-center">
-                          <div className="flex gap-1">
-                            <div className="w-2 h-2 bg-accent-500 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                            <div className="w-2 h-2 bg-accent-500 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                            <div className="w-2 h-2 bg-accent-500 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {transcript.map((segment) => (
-                        <div key={segment.id} className="flex gap-3">
-                          <span className="text-xs text-accent-500 font-mono shrink-0 mt-0.5">
-                            {formatTimestamp(segment.timestamp)}
-                          </span>
-                          <p className="text-sm text-neutral-700 dark:text-neutral-300 leading-relaxed">
-                            {segment.text}
-                          </p>
-                        </div>
-                      ))}
-                      <div ref={transcriptEndRef} />
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </Card>
         )}
 
         {/* Privacy Notice */}

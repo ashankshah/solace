@@ -417,6 +417,53 @@ export async function updateSubmissionStatus(
   };
 }
 
+export async function updateSubmissionSummary(
+  id: string,
+  summary: PatientSummary
+): Promise<PatientSubmission | null> {
+  const supabase = await createClient();
+
+  const { data: existing, error: fetchError } = await supabase
+    .from("patient_submissions")
+    .select("*")
+    .eq("id", id)
+    .single();
+
+  if (fetchError || !existing) return null;
+
+  const { answers, summary: existingSummary } = extractAnswersAndSummary(existing.answers);
+  const nextSummary = summary ?? existingSummary;
+  const answersPayload = nextSummary
+    ? { responses: answers, summary: nextSummary }
+    : answers;
+
+  const { data, error } = await supabase
+    .from("patient_submissions")
+    .update({
+      answers: answersPayload as unknown as Json,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error || !data) return null;
+
+  const { answers: storedAnswers, summary: storedSummary } = extractAnswersAndSummary(data.answers);
+
+  return {
+    id: data.id,
+    clinicId: data.clinic_id,
+    patientName: data.patient_name,
+    patientEmail: data.patient_email ?? undefined,
+    submittedAt: new Date(data.submitted_at),
+    questions: data.questions as Question[],
+    answers: storedAnswers,
+    summary: storedSummary,
+    status: data.status,
+  };
+}
+
 export async function clearDischargedSubmissions(clinicId: string): Promise<number> {
   const supabase = await createClient();
 
