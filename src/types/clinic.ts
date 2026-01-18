@@ -6,6 +6,7 @@ export interface PatientSummary {
   hpi?: string;
   ros?: string[] | string;
   assessmentPlan?: string[] | string;
+  scientificContext?: string;
 }
 
 export interface Clinic {

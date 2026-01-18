@@ -80,6 +80,10 @@ export async function POST(
       questions || [],
       answers as AnswerRecord
     );
+    if (!patientSummary) {
+      console.warn("Patient summary missing; skipping scientific context.");
+    }
+    const summaryWithContext = await attachScientificContext(patientSummary);
 
     const submission = await createSubmission(
       clinicId,
@@ -87,7 +91,7 @@ export async function POST(
       patientEmail?.trim(),
       questions || [],
       answers as AnswerRecord,
-      patientSummary
+      summaryWithContext
     );
 
     await rebalanceClinicQueue(clinicId);
@@ -182,4 +186,209 @@ async function generatePatientSummary(
     console.error("Patient summary error:", error);
     return undefined;
   }
+}
+
+async function attachScientificContext(
+  summary?: PatientSummary
+): Promise<PatientSummary | undefined> {
+  if (!summary) return undefined;
+
+  const scientificContext = await fetchScientificContext({
+    hpi: summary.hpi,
+    ros: summary.ros,
+    ap: summary.assessmentPlan,
+  });
+
+  return {
+    ...summary,
+    scientificContext,
+  };
+}
+
+async function fetchScientificContext({
+  hpi,
+  ros,
+  ap,
+}: {
+  hpi?: string;
+  ros?: string[] | string;
+  ap?: string[] | string;
+}): Promise<string> {
+  const coreApiKey = process.env.CORE_API_KEY;
+  if (!coreApiKey) {
+    console.warn("CORE_API_KEY missing; skipping scientific context.");
+    return "";
+  }
+
+  // Build a CORE search query from the summary content.
+  const query = await buildCoreQueryFromSummary({ hpi, ros, ap });
+  if (!query) {
+    console.warn("CORE query unavailable; skipping scientific context.");
+    return "";
+  }
+  console.log("CORE query built (length):", query.length);
+
+  try {
+    // Query CORE API v3 for relevant papers.
+    const response = await fetch("https://api.core.ac.uk/v3/search/outputs", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${coreApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        q: query,
+        limit: 5,
+        offset: 0,
+      }),
+    });
+
+    if (response.status === 429) {
+      console.warn("CORE API rate limit hit.");
+      return "";
+    }
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error("CORE API error:", error);
+      return "";
+    }
+
+    const data = await response.json();
+    const items = Array.isArray(data?.results)
+      ? data.results
+      : Array.isArray(data?.results?.items)
+        ? data.results.items
+        : Array.isArray(data?.outputs)
+          ? data.outputs
+          : Array.isArray(data?.data)
+            ? data.data
+            : [];
+    console.log("CORE results count:", items.length);
+
+    const snippets: string[] = [];
+    for (const item of items) {
+      const abstract = typeof item?.abstract === "string"
+        ? item.abstract
+        : typeof item?.metadata?.abstract === "string"
+          ? item.metadata.abstract
+          : typeof item?._source?.abstract === "string"
+            ? item._source.abstract
+            : typeof item?.document?.abstract === "string"
+              ? item.document.abstract
+              : "";
+      // Take the first sentence only.
+      const sentence = getFirstSentence(abstract);
+      if (sentence) snippets.push(sentence);
+    }
+    console.log("CORE abstracts used:", snippets.length);
+
+    return snippets.join(" ").trim();
+  } catch (error) {
+    console.error("CORE API error:", error);
+    return "";
+  }
+}
+
+async function buildCoreQueryFromSummary({
+  hpi,
+  ros,
+  ap,
+}: {
+  hpi?: string;
+  ros?: string[] | string;
+  ap?: string[] | string;
+}): Promise<string> {
+  const openaiApiKey = process.env.OPENAI_API_KEY;
+  const summaryText = [
+    hpi || "",
+    Array.isArray(ros) ? ros.join(" ") : ros || "",
+    Array.isArray(ap) ? ap.join(" ") : ap || "",
+  ]
+    .join(" ")
+    .trim();
+
+  if (!summaryText) return "";
+
+  if (!openaiApiKey) {
+    return buildFallbackQuery(summaryText);
+  }
+
+  try {
+    // Use an LLM to produce a CORE-friendly query string.
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${openaiApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        temperature: 0.1,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content:
+              "You create CORE API v3 search queries. Return ONLY JSON: {\"query\":\"...\"}. " +
+              "Prioritize recall over precision; keep queries broad and permissive. " +
+              "Prefer OR between 3-6 key terms (symptoms, conditions, differentials). " +
+              "You MAY use title:/abstract:, but do not require them. " +
+              "Use quotes for multi-word phrases only if necessary. Avoid patient identifiers. " +
+              "Keep the query under 200 characters.",
+          },
+          {
+            role: "user",
+            content: `Summary:\n${summaryText}`,
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error("CORE query LLM error:", error);
+      return buildFallbackQuery(summaryText);
+    }
+
+    const data = await response.json();
+    const content = data?.choices?.[0]?.message?.content;
+    if (!content) return buildFallbackQuery(summaryText);
+
+    const parsed = JSON.parse(content) as { query?: string };
+    if (typeof parsed.query === "string" && parsed.query.trim().length > 0) {
+      const fallback = buildFallbackQuery(summaryText);
+      return fallback ? `(${parsed.query}) OR (${fallback})` : parsed.query;
+    }
+    return buildFallbackQuery(summaryText);
+  } catch (error) {
+    console.error("CORE query LLM error:", error);
+    return buildFallbackQuery(summaryText);
+  }
+}
+
+function buildFallbackQuery(summaryText: string) {
+  const tokens = summaryText
+    .replace(/[^\w\s-]/g, " ")
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 3);
+
+  const uniqueTokens = Array.from(new Set(tokens)).slice(0, 6);
+  if (uniqueTokens.length === 0) return "";
+
+  const terms = uniqueTokens.map((token) => {
+    const sanitized = token.replace(/"/g, "");
+    return `(title:"${sanitized}" OR abstract:"${sanitized}" OR ${sanitized})`;
+  });
+
+  return terms.join(" OR ");
+}
+
+function getFirstSentence(text: string) {
+  const cleaned = text.replace(/\s+/g, " ").trim();
+  if (!cleaned) return "";
+  const index = cleaned.indexOf(".");
+  if (index === -1) return cleaned;
+  return cleaned.slice(0, index).trim();
 }
