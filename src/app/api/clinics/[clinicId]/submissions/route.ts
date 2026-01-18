@@ -266,24 +266,30 @@ async function fetchScientificContext({
             : [];
     console.log("CORE results count:", items.length);
 
-    const snippets: string[] = [];
-    for (const item of items) {
-      const abstract = typeof item?.abstract === "string"
-        ? item.abstract
-        : typeof item?.metadata?.abstract === "string"
-          ? item.metadata.abstract
-          : typeof item?._source?.abstract === "string"
-            ? item._source.abstract
-            : typeof item?.document?.abstract === "string"
-              ? item.document.abstract
-              : "";
-      // Take the first sentence only.
-      const sentence = getFirstSentence(abstract);
-      if (sentence) snippets.push(sentence);
-    }
-    console.log("CORE abstracts used:", snippets.length);
+    const papers = items
+      .map((item: Record<string, unknown>) => extractPaperInfo(item))
+      .filter((paper) => paper.abstract && paper.abstract.trim().length > 0);
 
-    return snippets.join(" ").trim();
+    console.log("CORE abstracts used:", papers.length);
+
+    if (papers.length === 0) return "";
+
+    const citations = papers.map((paper) => buildCitation(paper));
+    const abstractsPayload = papers
+      .map((paper, index) => `Paper ${index + 1} abstract: ${paper.abstract}`)
+      .join("\n");
+
+    // Compress abstracts before sending to OpenAI.
+    const compressedAbstracts = await compressText(abstractsPayload);
+    const inputForLlm = compressedAbstracts || abstractsPayload;
+
+    const summary = await summarizeScientificContext(inputForLlm, citations);
+    if (summary) return summary;
+
+    const fallbackSnippets = papers
+      .map((paper) => getFirstSentence(paper.abstract || ""))
+      .filter(Boolean);
+    return fallbackSnippets.join(" ").trim();
   } catch (error) {
     console.error("CORE API error:", error);
     return "";
@@ -315,6 +321,9 @@ async function buildCoreQueryFromSummary({
   }
 
   try {
+    // Compress the input sections before sending to OpenAI to reduce tokens.
+    const compressedSummary = await compressText(summaryText);
+    const inputForLlm = compressedSummary || summaryText || "";
     // Use an LLM to produce a CORE-friendly query string.
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -339,7 +348,7 @@ async function buildCoreQueryFromSummary({
           },
           {
             role: "user",
-            content: `Summary:\n${summaryText}`,
+            content: `Summary:\n${inputForLlm}`,
           },
         ],
       }),
@@ -367,6 +376,42 @@ async function buildCoreQueryFromSummary({
   }
 }
 
+async function compressText(input: string) {
+  const tokenApiKey = process.env.TOKEN_API_KEY;
+  if (!tokenApiKey) return "";
+
+  try {
+    const response = await fetch("https://api.thetokencompany.com/v1/compress", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${tokenApiKey}`,
+      },
+      body: JSON.stringify({
+        model: "bear-1",
+        compression_settings: {
+          aggressiveness: 0.5,
+          max_output_tokens: null,
+          min_output_tokens: null,
+        },
+        input,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error("Token compression error:", error);
+      return "";
+    }
+
+    const data = await response.json();
+    return typeof data?.output === "string" ? data.output : "";
+  } catch (error) {
+    console.error("Token compression error:", error);
+    return "";
+  }
+}
+
 function buildFallbackQuery(summaryText: string) {
   const tokens = summaryText
     .replace(/[^\w\s-]/g, " ")
@@ -383,6 +428,174 @@ function buildFallbackQuery(summaryText: string) {
   });
 
   return terms.join(" OR ");
+}
+
+type PaperInfo = {
+  title?: string;
+  authors?: string[];
+  year?: string;
+  abstract?: string;
+};
+
+function extractPaperInfo(item: Record<string, unknown>): PaperInfo {
+  const abstract = extractStringField(item, [
+    "abstract",
+    "metadata.abstract",
+    "_source.abstract",
+    "document.abstract",
+  ]);
+
+  const title = extractStringField(item, [
+    "title",
+    "metadata.title",
+    "_source.title",
+    "document.title",
+  ]);
+
+  const year =
+    extractStringField(item, ["year", "publishedYear", "publicationYear", "document.year"]) ||
+    extractYearFromDate(
+      extractStringField(item, ["publishedDate", "publicationDate", "document.publishedDate"])
+    );
+
+  const authors = extractAuthors(item);
+
+  return {
+    title,
+    authors,
+    year: year || undefined,
+    abstract: abstract || undefined,
+  };
+}
+
+function extractStringField(item: Record<string, unknown>, paths: string[]) {
+  for (const path of paths) {
+    const value = path.split(".").reduce((acc: unknown, key) => {
+      if (acc && typeof acc === "object" && key in acc) {
+        return (acc as Record<string, unknown>)[key];
+      }
+      return undefined;
+    }, item as unknown);
+
+    if (typeof value === "string") return value;
+  }
+  return "";
+}
+
+function extractYearFromDate(value?: string) {
+  if (!value) return "";
+  const match = value.match(/\b(19|20)\d{2}\b/);
+  return match ? match[0] : "";
+}
+
+function extractAuthors(item: Record<string, unknown>): string[] {
+  const candidates: unknown[] = [];
+  const pushIfArray = (value: unknown) => {
+    if (Array.isArray(value)) candidates.push(...value);
+  };
+  const pushIfPresent = (value: unknown) => {
+    if (value) candidates.push(value);
+  };
+
+  pushIfArray(item.authors);
+  pushIfPresent((item as Record<string, unknown>).authors);
+  pushIfArray(extractNestedArray(item, ["metadata", "authors"]));
+  pushIfArray(extractNestedArray(item, ["document", "authors"]));
+  pushIfArray(extractNestedArray(item, ["_source", "authors"]));
+
+  const names = candidates
+    .flatMap((candidate) => {
+      if (typeof candidate === "string") return [candidate];
+      if (candidate && typeof candidate === "object") {
+        const name = extractStringField(candidate as Record<string, unknown>, ["name", "fullName"]);
+        return name ? [name] : [];
+      }
+      return [];
+    })
+    .filter(Boolean);
+
+  return Array.from(new Set(names));
+}
+
+function extractNestedArray(item: Record<string, unknown>, path: string[]) {
+  return path.reduce((acc: unknown, key) => {
+    if (acc && typeof acc === "object" && key in acc) {
+      return (acc as Record<string, unknown>)[key];
+    }
+    return undefined;
+  }, item as unknown);
+}
+
+function buildCitation(paper: PaperInfo) {
+  const authors = paper.authors && paper.authors.length > 0
+    ? formatAuthorList(paper.authors)
+    : "Unknown";
+  const year = paper.year || "n.d.";
+  const title = paper.title || "Untitled";
+  return `${authors}, ${year} (${title})`;
+}
+
+function formatAuthorList(authors: string[]) {
+  if (authors.length === 0) return "Unknown";
+  const lastNames = authors.map((author) => {
+    const parts = author.trim().split(/\s+/);
+    return parts[parts.length - 1];
+  });
+  if (lastNames.length === 1) return lastNames[0];
+  if (lastNames.length === 2) return `${lastNames[0]} & ${lastNames[1]}`;
+  return `${lastNames[0]} et al.`;
+}
+
+async function summarizeScientificContext(
+  compressedAbstracts: string,
+  citations: string[]
+) {
+  const openaiApiKey = process.env.OPENAI_API_KEY;
+  if (!openaiApiKey) return "";
+
+  const citationList = citations
+    .map((citation, index) => `Paper ${index + 1} citation: ${citation}`)
+    .join("\n");
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${openaiApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        temperature: 0.2,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You summarize research abstracts for clinicians. Write EXACTLY two paragraphs. " +
+              "Every sentence must include a parenthetical citation using the provided citation strings. " +
+              "Do not invent sources or facts. Keep it clinically relevant and concise.",
+          },
+          {
+            role: "user",
+            content: `Citations:\n${citationList}\n\nCompressed abstracts:\n${compressedAbstracts}`,
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error("Scientific context LLM error:", error);
+      return "";
+    }
+
+    const data = await response.json();
+    const content = data?.choices?.[0]?.message?.content;
+    return typeof content === "string" ? content.trim() : "";
+  } catch (error) {
+    console.error("Scientific context LLM error:", error);
+    return "";
+  }
 }
 
 function getFirstSentence(text: string) {
