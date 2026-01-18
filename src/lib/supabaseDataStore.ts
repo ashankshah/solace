@@ -1,12 +1,47 @@
 // Supabase-backed data store
 // Replaces the in-memory dataStore with persistent Supabase storage
 
-import { createClient } from "./supabase/server";
-import type { Clinic, PatientSubmission } from "@/types/clinic";
+import { createAdminClient, createClient } from "./supabase/server";
+import type { Clinic, PatientSubmission, PatientSummary } from "@/types/clinic";
 import type { Question, AnswerRecord } from "@/types/intake";
 import type { SafeUser } from "@/types/auth";
 import type { ClinicLayout } from "@/types/layout";
 import type { Json } from "./supabase/types";
+
+function normalizePatientSummary(raw: unknown): PatientSummary | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const summary = raw as Record<string, unknown>;
+  const hpi = typeof summary.hpi === "string" ? summary.hpi : undefined;
+  const ros = summary.ros;
+  const assessmentPlan = summary.assessment_plan ?? summary.assessmentPlan;
+
+  const normalized: PatientSummary = {
+    hpi,
+    ros: typeof ros === "string" || Array.isArray(ros) ? (ros as PatientSummary["ros"]) : undefined,
+    assessmentPlan:
+      typeof assessmentPlan === "string" || Array.isArray(assessmentPlan)
+        ? (assessmentPlan as PatientSummary["assessmentPlan"])
+        : undefined,
+  };
+
+  const hasContent = Object.values(normalized).some((value) =>
+    Array.isArray(value) ? value.length > 0 : typeof value === "string" && value.trim().length > 0
+  );
+
+  return hasContent ? normalized : undefined;
+}
+
+function extractAnswersAndSummary(rawAnswers: unknown) {
+  if (rawAnswers && typeof rawAnswers === "object" && !Array.isArray(rawAnswers)) {
+    const payload = rawAnswers as { responses?: AnswerRecord; summary?: unknown; patientSummary?: unknown };
+    const summary = normalizePatientSummary(payload.summary ?? payload.patientSummary);
+    if (payload.responses && typeof payload.responses === "object") {
+      return { answers: payload.responses as AnswerRecord, summary };
+    }
+  }
+
+  return { answers: rawAnswers as AnswerRecord, summary: undefined };
+}
 
 // ============ USER/PROFILE OPERATIONS ============
 
@@ -259,14 +294,20 @@ export async function getSubmissionsByClinic(
   if (error || !data) return [];
 
   return data.map((submission) => ({
-    id: submission.id,
-    clinicId: submission.clinic_id,
-    patientName: submission.patient_name,
-    patientEmail: submission.patient_email ?? undefined,
-    submittedAt: new Date(submission.submitted_at),
-    questions: submission.questions as Question[],
-    answers: submission.answers as AnswerRecord,
-    status: submission.status,
+    ...(() => {
+      const { answers, summary } = extractAnswersAndSummary(submission.answers);
+      return {
+        id: submission.id,
+        clinicId: submission.clinic_id,
+        patientName: submission.patient_name,
+        patientEmail: submission.patient_email ?? undefined,
+        submittedAt: new Date(submission.submitted_at),
+        questions: submission.questions as Question[],
+        answers,
+        summary,
+        status: submission.status,
+      };
+    })(),
   }));
 }
 
@@ -283,6 +324,8 @@ export async function getSubmissionById(
 
   if (error || !data) return null;
 
+  const { answers, summary } = extractAnswersAndSummary(data.answers);
+
   return {
     id: data.id,
     clinicId: data.clinic_id,
@@ -290,7 +333,8 @@ export async function getSubmissionById(
     patientEmail: data.patient_email ?? undefined,
     submittedAt: new Date(data.submitted_at),
     questions: data.questions as Question[],
-    answers: data.answers as AnswerRecord,
+    answers,
+    summary,
     status: data.status,
   };
 }
@@ -300,9 +344,11 @@ export async function createSubmission(
   patientName: string,
   patientEmail: string | undefined,
   questions: Question[],
-  answers: AnswerRecord
+  answers: AnswerRecord,
+  summary?: PatientSummary
 ): Promise<PatientSubmission> {
   const supabase = await createClient();
+  const answersPayload = summary ? { responses: answers, summary } : answers;
 
   const { data, error } = await supabase
     .from("patient_submissions")
@@ -311,7 +357,7 @@ export async function createSubmission(
       patient_name: patientName,
       patient_email: patientEmail ?? null,
       questions: questions as unknown as Json,
-      answers: answers as unknown as Json,
+      answers: answersPayload as unknown as Json,
       status: "pending",
     })
     .select()
@@ -321,6 +367,8 @@ export async function createSubmission(
     throw new Error("Failed to create submission");
   }
 
+  const { answers: storedAnswers, summary: storedSummary } = extractAnswersAndSummary(data.answers);
+
   return {
     id: data.id,
     clinicId: data.clinic_id,
@@ -328,7 +376,8 @@ export async function createSubmission(
     patientEmail: data.patient_email ?? undefined,
     submittedAt: new Date(data.submitted_at),
     questions: data.questions as Question[],
-    answers: data.answers as AnswerRecord,
+    answers: storedAnswers,
+    summary: storedSummary,
     status: data.status,
   };
 }
@@ -351,6 +400,8 @@ export async function updateSubmissionStatus(
 
   if (error || !data) return null;
 
+  const { answers, summary } = extractAnswersAndSummary(data.answers);
+
   return {
     id: data.id,
     clinicId: data.clinic_id,
@@ -358,9 +409,101 @@ export async function updateSubmissionStatus(
     patientEmail: data.patient_email ?? undefined,
     submittedAt: new Date(data.submitted_at),
     questions: data.questions as Question[],
-    answers: data.answers as AnswerRecord,
+    answers,
+    summary,
     status: data.status,
   };
+}
+
+export async function clearDischargedSubmissions(clinicId: string): Promise<number> {
+  const supabase = await createClient();
+
+  const { error, count } = await supabase
+    .from("patient_submissions")
+    .delete({ count: "exact" })
+    .eq("clinic_id", clinicId)
+    .eq("status", "archived");
+
+  if (error) {
+    throw new Error("Failed to clear discharged patients");
+  }
+
+  return count ?? 0;
+}
+
+export async function rebalanceClinicQueue(clinicId: string) {
+  const supabase = await createAdminClient();
+
+  const { data: clinic, error: clinicError } = await supabase
+    .from("clinics")
+    .select("user_id")
+    .eq("id", clinicId)
+    .single();
+
+  if (clinicError || !clinic) {
+    console.error("Queue rebalance error: clinic not found", clinicError);
+    return;
+  }
+
+  const { data: profile, error: profileError } = await supabase
+    .from("profiles")
+    .select("clinic_layout")
+    .eq("id", clinic.user_id)
+    .single();
+
+  if (profileError || !profile?.clinic_layout) {
+    return;
+  }
+
+  const layout = profile.clinic_layout as ClinicLayout;
+  const patientRoomCapacity = Array.isArray(layout.rooms)
+    ? layout.rooms.filter((room) => room.type === "patient").length
+    : 0;
+
+  if (patientRoomCapacity <= 0) return;
+
+  const { data: activeRows, error: activeError } = await supabase
+    .from("patient_submissions")
+    .select("id")
+    .eq("clinic_id", clinicId)
+    .eq("status", "reviewed");
+
+  if (activeError) {
+    console.error("Queue rebalance error: active fetch failed", activeError);
+    return;
+  }
+
+  const activeCount = activeRows?.length ?? 0;
+  if (activeCount >= patientRoomCapacity) return;
+
+  const needed = patientRoomCapacity - activeCount;
+  const { data: pendingRows, error: pendingError } = await supabase
+    .from("patient_submissions")
+    .select("id")
+    .eq("clinic_id", clinicId)
+    .eq("status", "pending")
+    .order("submitted_at", { ascending: true })
+    .limit(needed);
+
+  if (pendingError || !pendingRows?.length) {
+    if (pendingError) {
+      console.error("Queue rebalance error: pending fetch failed", pendingError);
+    }
+    return;
+  }
+
+  const pendingIds = pendingRows.map((row) => row.id);
+  const { error: promoteError } = await supabase
+    .from("patient_submissions")
+    .update({
+      status: "reviewed",
+      updated_at: new Date().toISOString(),
+    })
+    .in("id", pendingIds);
+
+  if (promoteError) {
+    console.error("Queue rebalance error: promote failed", promoteError);
+  }
 }
 
 // ============ TRANSCRIPT OPERATIONS ============

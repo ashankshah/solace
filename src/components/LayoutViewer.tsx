@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import {
   type LayoutRoom,
@@ -9,9 +9,11 @@ import {
   GRID_ROWS,
   CELL_SIZE,
 } from "@/types/layout";
+import type { PatientSubmission } from "@/types/clinic";
 
 interface LayoutViewerProps {
   layout: ClinicLayout;
+  activeSubmissions?: PatientSubmission[];
   onEditClick?: () => void;
   className?: string;
 }
@@ -21,12 +23,16 @@ function ViewerRoom({
   room,
   cellSize,
   isHovered,
+  occupantInitials,
+  isOccupied,
   onHover,
   onLeave,
 }: {
   room: LayoutRoom;
   cellSize: number;
   isHovered: boolean;
+  occupantInitials?: string;
+  isOccupied: boolean;
   onHover: () => void;
   onLeave: () => void;
 }) {
@@ -45,12 +51,16 @@ function ViewerRoom({
         "rounded-xl border-2 transition-all duration-200 cursor-pointer",
         room.type === 'waiting'
           ? "bg-info-50 border-info-200 dark:bg-info-900/30 dark:border-info-700"
-          : "bg-success-50 border-success-200 dark:bg-success-900/30 dark:border-success-700",
+          : isOccupied
+            ? "bg-error-50 border-error-200 dark:bg-error-900/30 dark:border-error-700"
+            : "bg-success-50 border-success-200 dark:bg-success-900/30 dark:border-success-700",
         isHovered && [
           "shadow-lg z-10 scale-[1.02]",
           room.type === 'waiting'
             ? "border-info-400 dark:border-info-500"
-            : "border-success-400 dark:border-success-500"
+            : isOccupied
+              ? "border-error-400 dark:border-error-500"
+              : "border-success-400 dark:border-success-500"
         ]
       )}
     >
@@ -78,12 +88,19 @@ function ViewerRoom({
             <p className={cn(
               "text-xs font-semibold truncate",
               room.type === 'waiting'
-                ? "text-info-700 dark:text-info-300"
-                : "text-success-700 dark:text-success-300"
+                ? "text-blue-700 dark:text-blue-300"
+                : isOccupied
+                  ? "text-error-700 dark:text-error-300"
+                  : "text-success-700 dark:text-success-300"
             )}>
               {room.name}
             </p>
           </div>
+          {occupantInitials && (
+            <div className="w-6 h-6 rounded-full bg-error-500/15 text-error-700 dark:text-error-300 border border-error-200 dark:border-error-700 flex items-center justify-center text-[10px] font-semibold">
+              {occupantInitials}
+            </div>
+          )}
         </div>
         
         {room.width * room.height >= 4 && (
@@ -111,14 +128,49 @@ function ViewerRoom({
   );
 }
 
-export function LayoutViewer({ layout, onEditClick, className }: LayoutViewerProps) {
+export function LayoutViewer({ layout, activeSubmissions = [], onEditClick, className }: LayoutViewerProps) {
   const [hoveredRoomId, setHoveredRoomId] = useState<string | null>(null);
+  const [cellSize, setCellSize] = useState(CELL_SIZE);
+  const gridWrapperRef = useRef<HTMLDivElement>(null);
 
-  // Calculate responsive cell size based on container
-  const cellSize = useMemo(() => {
-    if (typeof window === 'undefined') return CELL_SIZE;
-    const maxWidth = Math.min(900, window.innerWidth - 64);
-    return Math.floor(maxWidth / GRID_COLS);
+  const sortedActiveSubmissions = useMemo(() => {
+    return (activeSubmissions ?? []).slice().sort(
+      (a, b) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime()
+    );
+  }, [activeSubmissions]);
+
+  const patientRooms = useMemo(() => {
+    return layout.rooms
+      .filter((room) => room.type === "patient")
+      .slice()
+      .sort((a, b) => (a.y - b.y) || (a.x - b.x));
+  }, [layout.rooms]);
+
+  const roomOccupants = useMemo(() => {
+    const map = new Map<string, PatientSubmission>();
+    patientRooms.forEach((room, index) => {
+      const submission = sortedActiveSubmissions[index];
+      if (submission) {
+        map.set(room.id, submission);
+      }
+    });
+    return map;
+  }, [patientRooms, sortedActiveSubmissions]);
+
+  useEffect(() => {
+    if (!gridWrapperRef.current) return;
+
+    const updateCellSize = () => {
+      const width = gridWrapperRef.current?.clientWidth ?? 0;
+      if (!width) return;
+      const nextSize = (width * 0.95) / GRID_COLS;
+      setCellSize((prev) => (Math.abs(prev - nextSize) > 0.1 ? nextSize : prev));
+    };
+
+    updateCellSize();
+    const observer = new ResizeObserver(updateCellSize);
+    observer.observe(gridWrapperRef.current);
+    return () => observer.disconnect();
   }, []);
 
   const gridWidth = GRID_COLS * cellSize;
@@ -181,38 +233,41 @@ export function LayoutViewer({ layout, onEditClick, className }: LayoutViewerPro
         )}
       </div>
 
-      {/* Grid Visualization */}
-      <div className="overflow-x-auto">
+      {/* Layout Visualization */}
+      <div ref={gridWrapperRef} className="w-full">
         <div
-          className="relative rounded-xl border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800/50 mx-auto"
+          className="relative mx-auto"
           style={{
             width: gridWidth,
             height: gridHeight,
           }}
         >
-          {/* Subtle grid pattern */}
-          <div
-            className="absolute inset-0 opacity-30"
-            style={{
-              backgroundSize: `${cellSize}px ${cellSize}px`,
-              backgroundImage: `
-                linear-gradient(to right, var(--color-neutral-300) 1px, transparent 1px),
-                linear-gradient(to bottom, var(--color-neutral-300) 1px, transparent 1px)
-              `,
-            }}
-          />
-
           {/* Rooms */}
-          {layout.rooms.map((room) => (
-            <ViewerRoom
-              key={room.id}
-              room={room}
-              cellSize={cellSize}
-              isHovered={hoveredRoomId === room.id}
-              onHover={() => setHoveredRoomId(room.id)}
-              onLeave={() => setHoveredRoomId(null)}
-            />
-          ))}
+          {layout.rooms.map((room) => {
+            const occupant = roomOccupants.get(room.id);
+            const occupantInitials = occupant
+              ? occupant.patientName
+                  .split(" ")
+                  .filter(Boolean)
+                  .slice(0, 2)
+                  .map((part) => part[0])
+                  .join("")
+                  .toUpperCase()
+              : undefined;
+
+            return (
+              <ViewerRoom
+                key={room.id}
+                room={room}
+                cellSize={cellSize}
+                isHovered={hoveredRoomId === room.id}
+                occupantInitials={occupantInitials}
+                isOccupied={!!occupant}
+                onHover={() => setHoveredRoomId(room.id)}
+                onLeave={() => setHoveredRoomId(null)}
+              />
+            );
+          })}
         </div>
       </div>
 

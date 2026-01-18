@@ -10,7 +10,6 @@ interface AuthContextType {
   isLoading: boolean;
   signInWithEmail: (email: string, password: string) => Promise<{ error: Error | null }>;
   signUpWithEmail: (email: string, password: string, name: string) => Promise<{ error: Error | null }>;
-  signInWithGoogle: () => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
 }
 
@@ -50,35 +49,34 @@ export function SupabaseAuthProvider({ children }: { children: React.ReactNode }
   }, [supabase.auth]);
 
   const signInWithEmail = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    return { error: error as Error | null };
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      return { error: error as Error | null };
+    } catch (error) {
+      return { error: error as Error };
+    }
   };
 
   const signUpWithEmail = async (email: string, password: string, name: string) => {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          name,
-          full_name: name,
-        },
-      },
-    });
-    return { error: error as Error | null };
-  };
+    try {
+      const res = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password, name }),
+      });
 
-  const signInWithGoogle = async () => {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
-    return { error: error as Error | null };
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: "Failed to create account" }));
+        return { error: new Error(data.error || "Failed to create account") };
+      }
+
+      return { error: null };
+    } catch (error) {
+      return { error: error as Error };
+    }
   };
 
   const signOut = async () => {
@@ -93,7 +91,6 @@ export function SupabaseAuthProvider({ children }: { children: React.ReactNode }
         isLoading,
         signInWithEmail,
         signUpWithEmail,
-        signInWithGoogle,
         signOut,
       }}
     >

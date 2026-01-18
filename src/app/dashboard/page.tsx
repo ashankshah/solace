@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useSupabaseAuth } from "@/components/SupabaseAuthProvider";
 import type { ClinicWithStats, PatientSubmission } from "@/types/clinic";
@@ -41,6 +41,7 @@ export default function DashboardPage() {
   const [selectedClinic, setSelectedClinic] = useState<ClinicWithStats | null>(null);
   const [submissions, setSubmissions] = useState<PatientSubmission[]>([]);
   const [selectedSubmission, setSelectedSubmission] = useState<PatientSubmission | null>(null);
+  const selectedSubmissionIdRef = useRef<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [submissionsLoading, setSubmissionsLoading] = useState(false);
   const [showNewClinicModal, setShowNewClinicModal] = useState(false);
@@ -57,13 +58,17 @@ export default function DashboardPage() {
     }
   }, [authLoading, user, router]);
 
-  // Fetch clinics on mount
+  // Fetch clinics when authenticated
   useEffect(() => {
-    if (status === "authenticated") {
-      fetchClinics();
-      fetchLayout();
+    if (authLoading) return;
+    if (!user) {
+      setLoading(false);
+      return;
     }
-  }, [status]);
+
+    fetchClinics();
+    fetchLayout();
+  }, [authLoading, user]);
 
   const fetchClinics = async () => {
     try {
@@ -96,8 +101,12 @@ export default function DashboardPage() {
     }
   };
 
+  useEffect(() => {
+    selectedSubmissionIdRef.current = selectedSubmission?.id ?? null;
+  }, [selectedSubmission]);
+
   // Fetch submissions when clinic changes
-  const fetchSubmissions = useCallback(async () => {
+  const fetchSubmissions = useCallback(async (preserveSelection: boolean = false) => {
     if (!selectedClinic) return;
     
     setSubmissionsLoading(true);
@@ -105,7 +114,13 @@ export default function DashboardPage() {
       const res = await fetch(`/api/clinics/${selectedClinic.id}/submissions`);
       const data = await res.json();
       setSubmissions(data);
-      setSelectedSubmission(null);
+      if (preserveSelection && selectedSubmissionIdRef.current) {
+        setSelectedSubmission(
+          data.find((submission: PatientSubmission) => submission.id === selectedSubmissionIdRef.current) || null
+        );
+      } else {
+        setSelectedSubmission(null);
+      }
     } catch (err) {
       console.error("Failed to fetch submissions:", err);
     } finally {
@@ -180,9 +195,38 @@ export default function DashboardPage() {
         }
         // Refresh clinic stats
         fetchClinics();
+        await fetchSubmissions(true);
       }
     } catch (err) {
       console.error("Failed to update submission:", err);
+    }
+  };
+
+  const handleDischargeSubmission = async (submission: PatientSubmission) => {
+    const confirmed = window.confirm(`Discharge ${submission.patientName}?`);
+    if (!confirmed) return;
+    await updateSubmissionStatus(submission.id, "archived");
+  };
+
+  const handleClearDischarged = async () => {
+    if (!selectedClinic) return;
+    if (dischargedSubmissions.length === 0) return;
+    const confirmed = window.confirm("Clear all discharged patients?");
+    if (!confirmed) return;
+
+    try {
+      const res = await fetch(
+        `/api/clinics/${selectedClinic.id}/submissions/clear-discharged`,
+        { method: "POST" }
+      );
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || "Failed to clear discharged patients");
+      }
+      await fetchSubmissions(true);
+      fetchClinics();
+    } catch (err) {
+      console.error("Failed to clear discharged patients:", err);
     }
   };
 
@@ -198,6 +242,27 @@ export default function DashboardPage() {
     await signOut();
     router.push("/login");
   };
+
+  const sortBySubmittedAtAsc = (a: PatientSubmission, b: PatientSubmission) =>
+    new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime();
+  const sortBySubmittedAtDesc = (a: PatientSubmission, b: PatientSubmission) =>
+    new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime();
+
+  const activeSubmissions = submissions
+    .filter((submission) => submission.status === "reviewed")
+    .sort(sortBySubmittedAtAsc);
+  const queuedSubmissions = submissions
+    .filter((submission) => submission.status === "pending")
+    .sort(sortBySubmittedAtAsc);
+  const dischargedSubmissions = submissions
+    .filter((submission) => submission.status === "archived")
+    .sort(sortBySubmittedAtDesc);
+
+  const submissionGroups = [
+    { label: "Active", items: activeSubmissions },
+    { label: "Queue", items: queuedSubmissions },
+    { label: "Discharged", items: dischargedSubmissions },
+  ];
 
   return (
     <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950">
@@ -275,14 +340,14 @@ export default function DashboardPage() {
       </Header>
 
       <div className="mx-auto max-w-7xl px-6 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-stretch">
           {/* Clinic Selector */}
           <div className="lg:col-span-1">
-            <Card padding="none" className="overflow-hidden">
+            <Card padding="none" className="overflow-hidden h-full flex flex-col min-h-0">
               <CardHeader>
                 <CardTitle>Clinics</CardTitle>
               </CardHeader>
-              <div className="divide-y divide-neutral-100 dark:divide-neutral-800">
+              <div className="divide-y divide-neutral-100 dark:divide-neutral-800 flex-1 overflow-y-auto min-h-0">
                 {clinics.map((clinic) => (
                   <button
                     key={clinic.id}
@@ -370,10 +435,10 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
-                  {/* Solace Listen Section */}
-                  <div className="mt-4 p-4 rounded-xl bg-gradient-to-r from-accent-50 to-accent-100/50 dark:from-accent-900/20 dark:to-accent-800/10 border border-accent-200/50 dark:border-accent-700/30">
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="min-w-0 flex-1 flex items-center gap-3">
+                {/* Solace Ally Section */}
+                <div className="mt-4 p-4 rounded-xl bg-gradient-to-r from-accent-50 to-accent-100/50 dark:from-accent-900/20 dark:to-accent-800/10 border border-accent-200/50 dark:border-accent-700/30">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="min-w-0 flex-1 flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl bg-accent-500 flex items-center justify-center shrink-0">
                           <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
@@ -381,7 +446,7 @@ export default function DashboardPage() {
                         </div>
                         <div>
                           <p className="text-sm font-medium text-accent-700 dark:text-accent-300">
-                            Solace Listen
+                            Solace Ally
                           </p>
                           <p className="text-xs text-accent-600/70 dark:text-accent-400/70 mt-0.5">
                             Record and transcribe patient conversations
@@ -405,7 +470,28 @@ export default function DashboardPage() {
                   <Card padding="none" className="overflow-hidden">
                     <CardHeader className="flex items-center justify-between">
                       <CardTitle>Patient Check-ins</CardTitle>
-                      <Badge variant="secondary" size="sm">{submissions.length}</Badge>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => fetchSubmissions(true)}
+                          className="p-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-200 hover:border-neutral-300 dark:hover:border-neutral-600 transition-colors"
+                          title="Refresh patients"
+                          aria-label="Refresh patients"
+                        >
+                          <RefreshIcon />
+                        </button>
+                        <button
+                          onClick={handleClearDischarged}
+                          disabled={dischargedSubmissions.length === 0}
+                          className="p-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 text-neutral-500 hover:text-error-600 hover:border-error-300 dark:hover:border-error-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-neutral-200"
+                          title="Clear discharged patients"
+                          aria-label="Clear discharged patients"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3m-4 0h14" />
+                          </svg>
+                        </button>
+                        <Badge variant="secondary" size="sm">{submissions.length}</Badge>
+                      </div>
                     </CardHeader>
                     
                     {submissionsLoading ? (
@@ -419,34 +505,75 @@ export default function DashboardPage() {
                         description="Share the check-in link to get started"
                       />
                     ) : (
-                      <div className="divide-y divide-neutral-100 dark:divide-neutral-800 max-h-96 overflow-y-auto">
-                        {submissions.map((submission) => (
-                          <button
-                            key={submission.id}
-                            onClick={() => setSelectedSubmission(submission)}
-                            className={`w-full px-5 py-4 text-left transition-all duration-150 ${
-                              selectedSubmission?.id === submission.id
-                                ? "bg-accent-50 border-l-[3px] border-l-accent-500 dark:bg-accent-500/10"
-                                : "border-l-[3px] border-l-transparent hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
-                            }`}
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0 flex-1">
-                                <p className={`font-medium text-sm truncate ${
-                                  selectedSubmission?.id === submission.id 
-                                    ? "text-accent-700 dark:text-accent-400" 
-                                    : "text-neutral-900 dark:text-neutral-100"
-                                }`}>
-                                  {submission.patientName}
-                                </p>
-                                <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
-                                  {formatDate(submission.submittedAt)}
-                                </p>
+                      <div className="max-h-96 overflow-y-auto">
+                        {submissionGroups
+                          .filter((group) => group.items.length > 0)
+                          .map((group, groupIndex) => (
+                            <div
+                              key={group.label}
+                              className={`border-t border-neutral-100 dark:border-neutral-800 ${
+                                groupIndex === 0 ? "border-t-0" : ""
+                              }`}
+                            >
+                              <div className="px-5 py-2 text-[10px] uppercase tracking-wider font-medium text-neutral-400 dark:text-neutral-500">
+                                {group.label}
                               </div>
-                              <StatusBadge status={submission.status as "pending" | "reviewed" | "archived"} />
+                              <div className="divide-y divide-neutral-100 dark:divide-neutral-800">
+                                {group.items.map((submission) => (
+                                  <div
+                                    key={submission.id}
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => setSelectedSubmission(submission)}
+                                    onKeyDown={(event) => {
+                                      if (event.key === "Enter" || event.key === " ") {
+                                        event.preventDefault();
+                                        setSelectedSubmission(submission);
+                                      }
+                                    }}
+                                    className={`group w-full px-5 py-4 text-left transition-all duration-150 cursor-pointer ${
+                                      selectedSubmission?.id === submission.id
+                                        ? "bg-accent-50 border-l-[3px] border-l-accent-500 dark:bg-accent-500/10"
+                                        : "border-l-[3px] border-l-transparent hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
+                                    }`}
+                                  >
+                                    <div className="flex items-start justify-between gap-3">
+                                      <div className="min-w-0 flex-1">
+                                        <p className={`font-medium text-sm truncate ${
+                                          selectedSubmission?.id === submission.id 
+                                            ? "text-accent-700 dark:text-accent-400" 
+                                            : "text-neutral-900 dark:text-neutral-100"
+                                        }`}>
+                                          {submission.patientName}
+                                        </p>
+                                        <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
+                                          {formatDate(submission.submittedAt)}
+                                        </p>
+                                      </div>
+                                      <div className="flex items-center gap-2 shrink-0">
+                                        <StatusBadge status={submission.status as "pending" | "reviewed" | "archived"} />
+                                        {submission.status !== "archived" && (
+                                          <button
+                                            onClick={(event) => {
+                                              event.stopPropagation();
+                                              handleDischargeSubmission(submission);
+                                            }}
+                                            className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 text-neutral-500 hover:text-error-600 hover:border-error-300 dark:hover:border-error-600"
+                                            title="Discharge patient"
+                                            aria-label={`Discharge ${submission.patientName}`}
+                                          >
+                                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                            </svg>
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
-                          </button>
-                        ))}
+                          ))}
                       </div>
                     )}
                   </Card>
@@ -482,9 +609,9 @@ export default function DashboardPage() {
                               onChange={(e) => updateSubmissionStatus(selectedSubmission.id, e.target.value)}
                               className="text-xs font-medium px-3 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 cursor-pointer focus:ring-2 focus:ring-accent-500 focus:ring-offset-1 bg-white dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300"
                             >
-                              <option value="pending">pending</option>
-                              <option value="reviewed">reviewed</option>
-                              <option value="archived">archived</option>
+                              <option value="reviewed">Active</option>
+                              <option value="pending">Queue</option>
+                              <option value="archived">Discharged</option>
                             </select>
                           </div>
                         </div>
@@ -560,6 +687,7 @@ export default function DashboardPage() {
         <div className="mt-8">
           <LayoutViewer
             layout={clinicLayout}
+            activeSubmissions={activeSubmissions}
             onEditClick={() => router.push("/settings")}
           />
         </div>

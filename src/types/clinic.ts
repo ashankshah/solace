@@ -2,6 +2,12 @@
 
 import type { Question, AnswerRecord } from "./intake";
 
+export interface PatientSummary {
+  hpi?: string;
+  ros?: string[] | string;
+  assessmentPlan?: string[] | string;
+}
+
 export interface Clinic {
   id: string;
   userId: string; // Owner of the clinic
@@ -18,6 +24,7 @@ export interface PatientSubmission {
   submittedAt: Date;
   questions: Question[];
   answers: AnswerRecord;
+  summary?: PatientSummary;
   status: "pending" | "reviewed" | "archived";
 }
 
