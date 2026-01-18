@@ -1,18 +1,61 @@
 # Solace Python Backend Dependencies
 # Install with: pip install -r requirements.txt
 
-# Web Framework
+# ============================================
+# Web Framework & Server
+# ============================================
 fastapi>=0.109.0
 uvicorn[standard]>=0.27.0
 
-# OpenAI (for AI agents)
+# ============================================
+# AI & LLM Integration
+# ============================================
 openai>=1.12.0
 
-# Environment variables
+# ============================================
+# Data Validation & Serialization
+# ============================================
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# ============================================
+# Environment & Configuration
+# ============================================
 python-dotenv>=1.0.0
 
-# HTTP client (async)
+# ============================================
+# HTTP Client (async)
+# ============================================
 httpx>=0.26.0
 
-# Pydantic (data validation, included with FastAPI but pinned for compatibility)
-pydantic>=2.5.0
+# ============================================
+# Security & Authentication
+# ============================================
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+bcrypt>=4.1.0
+
+# ============================================
+# CORS & Middleware
+# ============================================
+starlette>=0.35.0
+
+# ============================================
+# Database (optional - for future persistence)
+# ============================================
+# sqlalchemy>=2.0.0
+# asyncpg>=0.29.0  # PostgreSQL async driver
+# alembic>=1.13.0  # Database migrations
+
+# ============================================
+# Utilities
+# ============================================
+python-multipart>=0.0.6  # Form data handling
+typing-extensions>=4.9.0
+
+# ============================================
+# Development & Testing
+# ============================================
+# pytest>=7.4.0
+# pytest-asyncio>=0.23.0
+# httpx>=0.26.0  # Also used for testing
