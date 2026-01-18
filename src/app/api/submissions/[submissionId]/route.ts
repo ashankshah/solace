@@ -1,5 +1,10 @@
 import { getCurrentUser } from "@/lib/supabaseAuth";
-import { getClinicByIdForUser, getSubmissionById, updateSubmissionStatus } from "@/lib/supabaseDataStore";
+import {
+  getClinicByIdForUser,
+  getSubmissionById,
+  updateSubmissionStatus,
+  rebalanceClinicQueue,
+} from "@/lib/supabaseDataStore";
 import { NextRequest, NextResponse } from "next/server";
 
 // GET /api/submissions/[submissionId] - Get a specific submission (auth required)
@@ -73,6 +78,8 @@ export async function PATCH(
     if (!updated) {
       return NextResponse.json({ error: "Submission not found" }, { status: 404 });
     }
+
+    await rebalanceClinicQueue(submission.clinicId);
 
     return NextResponse.json(updated);
   } catch (error) {

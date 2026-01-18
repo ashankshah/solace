@@ -29,7 +29,12 @@ export async function POST(request: NextRequest) {
     // For now, use OpenAI Whisper API since Wispr Flow doesn't have a public web API
     // The Wispr key is stored for future integration when their API becomes available
     if (openaiApiKey) {
-      transcription = await transcribeWithOpenAI(buffer, openaiApiKey, audioFile.type);
+      transcription = await transcribeWithOpenAI(
+        buffer,
+        openaiApiKey,
+        audioFile.type,
+        audioFile.name
+      );
     } else if (wisprApiKey) {
       // Placeholder for Wispr API integration
       // When Wispr releases a web API, implement here:
@@ -55,17 +60,18 @@ export async function POST(request: NextRequest) {
 async function transcribeWithOpenAI(
   audioBuffer: Buffer, 
   apiKey: string,
-  mimeType: string
+  mimeType: string,
+  fileName?: string
 ): Promise<string> {
+  const normalizedMimeType = normalizeMimeType(mimeType);
+  const extension = extensionFromMimeType(normalizedMimeType) 
+    ?? extensionFromFileName(fileName) 
+    ?? "webm";
+
   // Create a FormData for the OpenAI API
   const formData = new FormData();
   
-  // Determine file extension from mime type
-  const extension = mimeType.includes("webm") ? "webm" : 
-                    mimeType.includes("mp4") ? "mp4" : 
-                    mimeType.includes("wav") ? "wav" : "webm";
-  
-  const blob = new Blob([audioBuffer], { type: mimeType });
+  const blob = new Blob([audioBuffer], { type: normalizedMimeType });
   formData.append("file", blob, `audio.${extension}`);
   formData.append("model", "whisper-1");
   formData.append("language", "en");
@@ -87,4 +93,41 @@ async function transcribeWithOpenAI(
 
   const transcription = await response.text();
   return transcription.trim();
+}
+
+function normalizeMimeType(mimeType?: string) {
+  if (!mimeType) return "audio/webm";
+  return mimeType.split(";")[0].trim().toLowerCase();
+}
+
+function extensionFromMimeType(mimeType: string) {
+  switch (mimeType) {
+    case "audio/webm":
+      return "webm";
+    case "audio/mp4":
+      return "mp4";
+    case "audio/x-m4a":
+    case "audio/m4a":
+      return "m4a";
+    case "audio/mpeg":
+    case "audio/mpga":
+      return "mp3";
+    case "audio/ogg":
+      return "ogg";
+    case "audio/oga":
+      return "oga";
+    case "audio/wav":
+    case "audio/x-wav":
+      return "wav";
+    case "audio/flac":
+      return "flac";
+    default:
+      return null;
+  }
+}
+
+function extensionFromFileName(fileName?: string) {
+  if (!fileName) return null;
+  const match = fileName.toLowerCase().match(/\.([a-z0-9]+)$/);
+  return match ? match[1] : null;
 }

@@ -182,7 +182,7 @@ export default function CheckinPage({ params }: CheckinPageProps) {
         <Header maxWidth="3xl">
           <div className="flex items-center gap-3">
             <SolaceLogo />
-            <span className="text-base font-semibold text-neutral-900 dark:text-neutral-100">Solace</span>
+            <span className="text-base font-semibold text-neutral-900 dark:text-neutral-100">Solace Ask</span>
           </div>
         </Header>
 
@@ -190,7 +190,7 @@ export default function CheckinPage({ params }: CheckinPageProps) {
         <main className="mx-auto max-w-md px-6 py-16">
           <div className="text-center mb-10">
             <p className="text-xs font-semibold text-accent-600 dark:text-accent-400 mb-3 tracking-wider uppercase">
-              Check-in for
+              Welcome, I&apos;m Solace Ask
             </p>
             <h1 className="text-2xl font-semibold text-neutral-900 dark:text-neutral-100 tracking-tight">
               {clinic?.name}

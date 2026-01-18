@@ -33,7 +33,7 @@ import { Button, Input, Modal, ModalFooter } from "@/components/ui";
 interface LayoutBuilderProps {
   layout: ClinicLayout;
   onChange: (layout: ClinicLayout) => void;
-  onSave?: () => void;
+  onSave?: (nextLayout?: ClinicLayout, options?: { silent?: boolean }) => void;
   isSaving?: boolean;
 }
 
@@ -150,18 +150,33 @@ function GridRoom({
         {...attributes}
         className="w-full h-full p-2 flex flex-col"
       >
-        <div className="flex items-start justify-between gap-1">
+        <div className="flex items-start gap-2">
+          <div
+            className={cn(
+              "w-5 h-5 rounded-md flex items-center justify-center shrink-0",
+              room.type === 'waiting'
+                ? "bg-info-500 text-white"
+                : "bg-success-500 text-white"
+            )}
+          >
+            {room.type === 'waiting' ? (
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
+            ) : (
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
+            )}
+          </div>
           <div className="min-w-0 flex-1">
             <p className={cn(
-              "text-xs font-semibold truncate",
+              "font-semibold truncate leading-tight",
               room.type === 'waiting'
-                ? "text-info-700 dark:text-info-600"
-                : "text-success-700 dark:text-success-300"
+                ? "text-xs text-info-700 dark:text-info-600"
+                : "text-[11px] text-success-700 dark:text-success-300"
             )}>
               {room.name}
-            </p>
-            <p className="text-[10px] text-neutral-500 dark:text-neutral-400 mt-0.5">
-              {room.type === 'waiting' ? 'Waiting' : 'Patient'}
             </p>
           </div>
         </div>
@@ -216,18 +231,33 @@ function StaticRoom({ room, cellSize }: { room: LayoutRoom; cellSize: number }) 
       )}
     >
       <div className="w-full h-full p-2 flex flex-col">
-        <div className="flex items-start justify-between gap-1">
+        <div className="flex items-start gap-2">
+          <div
+            className={cn(
+              "w-5 h-5 rounded-md flex items-center justify-center shrink-0",
+              room.type === 'waiting'
+                ? "bg-info-500 text-white"
+                : "bg-success-500 text-white"
+            )}
+          >
+            {room.type === 'waiting' ? (
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
+            ) : (
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
+            )}
+          </div>
           <div className="min-w-0 flex-1">
             <p className={cn(
-              "text-xs font-semibold truncate",
+              "font-semibold truncate leading-tight",
               room.type === 'waiting'
-                ? "text-info-700 dark:text-info-600"
-                : "text-success-700 dark:text-success-300"
+                ? "text-xs text-info-700 dark:text-info-600"
+                : "text-[11px] text-success-700 dark:text-success-300"
             )}>
               {room.name}
-            </p>
-            <p className="text-[10px] text-neutral-500 dark:text-neutral-400 mt-0.5">
-              {room.type === 'waiting' ? 'Waiting' : 'Patient'}
             </p>
           </div>
         </div>
@@ -512,7 +542,7 @@ export function LayoutBuilder({ layout, onChange, onSave, isSaving }: LayoutBuil
       updatedAt: new Date(),
     });
     setSelectedRoomId(null);
-  }, [layout, onChange]);
+  }, [layout, onChange, onSave]);
 
   const handleEditRoom = useCallback((room: LayoutRoom) => {
     setEditingRoom(room);
@@ -567,11 +597,15 @@ export function LayoutBuilder({ layout, onChange, onSave, isSaving }: LayoutBuil
     const confirmed = window.confirm("Confirm reset clinic layout? This will remove all rooms.");
     if (!confirmed) return;
 
-    onChange({
+    const resetLayout = {
       ...layout,
       rooms: [],
       updatedAt: new Date(),
-    });
+    };
+    onChange(resetLayout);
+    if (onSave) {
+      onSave(resetLayout, { silent: true });
+    }
     setSelectedRoomId(null);
     setEditingRoom(null);
     setEditName("");

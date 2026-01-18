@@ -4,8 +4,11 @@ import {
   getClinicById,
   getSubmissionsByClinic,
   createSubmission,
+  rebalanceClinicQueue,
 } from "@/lib/supabaseDataStore";
 import { getCurrentUser } from "@/lib/supabaseAuth";
+import type { AnswerRecord, Question } from "@/types/intake";
+import type { PatientSummary } from "@/types/clinic";
 
 // GET /api/clinics/[clinicId]/submissions - Get all submissions for a clinic (auth required)
 export async function GET(
@@ -72,13 +75,22 @@ export async function POST(
       );
     }
 
+    const patientSummary = await generatePatientSummary(
+      patientName.trim(),
+      questions || [],
+      answers as AnswerRecord
+    );
+
     const submission = await createSubmission(
       clinicId,
       patientName.trim(),
       patientEmail?.trim(),
       questions || [],
-      answers
+      answers as AnswerRecord,
+      patientSummary
     );
+
+    await rebalanceClinicQueue(clinicId);
 
     return NextResponse.json(submission, { status: 201 });
   } catch (error) {
@@ -87,5 +99,87 @@ export async function POST(
       { error: "Failed to create submission" },
       { status: 500 }
     );
+  }
+}
+
+function formatAnswer(answer?: AnswerRecord[keyof AnswerRecord]) {
+  if (!answer) return "—";
+  if (answer.type === "multiple_choice") return answer.selectedValue || "—";
+  if (answer.type === "slider") return `${answer.value}`;
+  if (answer.type === "short_answer") return answer.value || "—";
+  return "—";
+}
+
+async function generatePatientSummary(
+  patientName: string,
+  questions: Question[],
+  answers: AnswerRecord
+): Promise<PatientSummary | undefined> {
+  const openaiApiKey = process.env.OPENAI_API_KEY;
+  if (!openaiApiKey) return undefined;
+
+  const qaLines = questions.map((question) => {
+    const answer = answers[question.id];
+    return `Q: ${question.question}\nA: ${formatAnswer(answer)}`;
+  });
+
+  const prompt = [
+    `Patient name: ${patientName}`,
+    "",
+    "Intake Q&A:",
+    qaLines.join("\n"),
+  ].join("\n");
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${openaiApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        temperature: 0.2,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a medical scribe. Based on the intake Q&A, produce a concise JSON summary for a clinician. " +
+              "Return ONLY valid JSON with keys: hpi (string), ros (array of strings), assessment_plan (array of strings). " +
+              "The assessment_plan should be predictive but cautious, with differentials and next steps.",
+          },
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error("Patient summary error:", error);
+      return undefined;
+    }
+
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) return undefined;
+
+    const parsed = JSON.parse(content) as {
+      hpi?: string;
+      ros?: string[] | string;
+      assessment_plan?: string[] | string;
+    };
+
+    return {
+      hpi: parsed.hpi,
+      ros: parsed.ros,
+      assessmentPlan: parsed.assessment_plan,
+    };
+  } catch (error) {
+    console.error("Patient summary error:", error);
+    return undefined;
   }
 }

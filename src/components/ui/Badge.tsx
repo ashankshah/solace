@@ -48,10 +48,15 @@ export function Badge({ children, variant = "default", size = "md", className }:
 export function StatusBadge({ status }: { status: string }) {
   const variant = status as BadgeVariant;
   const validVariants: BadgeVariant[] = ["pending", "reviewed", "archived"];
+  const statusLabel: Record<string, string> = {
+    pending: "Queue",
+    reviewed: "Active",
+    archived: "Discharged",
+  };
   
   return (
     <Badge variant={validVariants.includes(variant) ? variant : "default"}>
-      {status}
+      {statusLabel[status] ?? status}
     </Badge>
   );
 }

@@ -58,15 +58,18 @@ export default function SettingsPage() {
     }
   };
 
-  const handleSave = useCallback(async () => {
+  const handleSave = useCallback(async (nextLayout?: ClinicLayout, options?: { silent?: boolean }) => {
+    const layoutToSave = nextLayout ?? layout;
     setSaving(true);
-    setSaveMessage(null);
+    if (!options?.silent) {
+      setSaveMessage(null);
+    }
 
     try {
       const res = await fetch("/api/layout", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(layout),
+        body: JSON.stringify(layoutToSave),
       });
 
       if (res.ok) {
@@ -76,8 +79,10 @@ export default function SettingsPage() {
           createdAt: new Date(data.createdAt),
           updatedAt: new Date(data.updatedAt),
         });
-        setSaveMessage({ type: 'success', text: 'Layout saved successfully!' });
-        setTimeout(() => setSaveMessage(null), 3000);
+        if (!options?.silent) {
+          setSaveMessage({ type: 'success', text: 'Layout saved successfully!' });
+          setTimeout(() => setSaveMessage(null), 3000);
+        }
       } else {
         const error = await res.json();
         setSaveMessage({ type: 'error', text: error.error || 'Failed to save layout' });
