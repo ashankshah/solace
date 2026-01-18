@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import { useSupabaseAuth } from "@/components/SupabaseAuthProvider";
 import type { ClinicWithStats, PatientSubmission } from "@/types/clinic";
 import type { ClinicLayout } from "@/types/layout";
 import { formatDate } from "@/lib/utils";
@@ -35,7 +35,7 @@ import {
 } from "@/components/ui";
 
 export default function DashboardPage() {
-  const { data: session, status } = useSession();
+  const { user, isLoading: authLoading, signOut } = useSupabaseAuth();
   const router = useRouter();
   const [clinics, setClinics] = useState<ClinicWithStats[]>([]);
   const [selectedClinic, setSelectedClinic] = useState<ClinicWithStats | null>(null);
@@ -52,10 +52,10 @@ export default function DashboardPage() {
 
   // Redirect to login if not authenticated
   useEffect(() => {
-    if (status === "unauthenticated") {
+    if (!authLoading && !user) {
       router.push("/login");
     }
-  }, [status, router]);
+  }, [authLoading, user, router]);
 
   // Fetch clinics on mount
   useEffect(() => {
@@ -190,12 +190,13 @@ export default function DashboardPage() {
     return <PageLoader label="Loading clinics..." />;
   }
 
-  if (status === "unauthenticated") {
+  if (!authLoading && !user) {
     return <PageLoader label="Redirecting to login..." />;
   }
 
   const handleSignOut = async () => {
-    await signOut({ callbackUrl: "/login" });
+    await signOut();
+    router.push("/login");
   };
 
   return (
@@ -216,11 +217,11 @@ export default function DashboardPage() {
             >
               <div className="w-8 h-8 rounded-full bg-accent-100 dark:bg-accent-900/30 flex items-center justify-center">
                 <span className="text-accent-600 dark:text-accent-400 font-semibold text-sm">
-                  {session?.user?.name?.charAt(0).toUpperCase() || "U"}
+                  {user?.user_metadata?.name?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase() || "U"}
                 </span>
               </div>
               <span className="hidden sm:block max-w-[120px] truncate">
-                {session?.user?.name || "User"}
+                {user?.user_metadata?.name || user?.email?.split("@")[0] || "User"}
               </span>
               <svg className="w-4 h-4 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -236,10 +237,10 @@ export default function DashboardPage() {
                 <div className="absolute right-0 mt-2 w-56 rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-lg z-50 overflow-hidden">
                   <div className="px-4 py-3 border-b border-neutral-100 dark:border-neutral-800">
                     <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100 truncate">
-                      {session?.user?.name}
+                      {user?.user_metadata?.name || user?.email?.split("@")[0]}
                     </p>
                     <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate">
-                      {session?.user?.email}
+                      {user?.email}
                     </p>
                   </div>
                   <div className="py-1">

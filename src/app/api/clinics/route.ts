@@ -1,30 +1,32 @@
 import { NextResponse } from "next/server";
-import { getClinicsByUser, createClinic, getClinicStats } from "@/lib/dataStore";
-import { auth } from "@/lib/auth";
+import { getClinicsByUser, createClinic, getClinicStats } from "@/lib/supabaseDataStore";
+import { getCurrentUser } from "@/lib/supabaseAuth";
 import type { ClinicWithStats } from "@/types/clinic";
 
 // GET /api/clinics - Get all clinics for the authenticated user
 export async function GET() {
   try {
-    const session = await auth();
+    const user = await getCurrentUser();
     
-    if (!session?.user?.id) {
+    if (!user?.id) {
       return NextResponse.json(
         { error: "Unauthorized" },
         { status: 401 }
       );
     }
 
-    const clinics = getClinicsByUser(session.user.id);
+    const clinics = await getClinicsByUser(user.id);
     
-    const clinicsWithStats: ClinicWithStats[] = clinics.map((clinic) => {
-      const stats = getClinicStats(clinic.id);
-      return {
-        ...clinic,
-        patientCount: stats.totalPatients,
-        pendingCount: stats.pendingCount,
-      };
-    });
+    const clinicsWithStats: ClinicWithStats[] = await Promise.all(
+      clinics.map(async (clinic) => {
+        const stats = await getClinicStats(clinic.id);
+        return {
+          ...clinic,
+          patientCount: stats.totalPatients,
+          pendingCount: stats.pendingCount,
+        };
+      })
+    );
 
     return NextResponse.json(clinicsWithStats);
   } catch (error) {
@@ -39,9 +41,9 @@ export async function GET() {
 // POST /api/clinics - Create a new clinic for the authenticated user
 export async function POST(request: Request) {
   try {
-    const session = await auth();
+    const user = await getCurrentUser();
     
-    if (!session?.user?.id) {
+    if (!user?.id) {
       return NextResponse.json(
         { error: "Unauthorized" },
         { status: 401 }
@@ -57,7 +59,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const clinic = createClinic(session.user.id, name.trim(), address?.trim());
+    const clinic = await createClinic(user.id, name.trim(), address?.trim());
 
     return NextResponse.json(clinic, { status: 201 });
   } catch (error) {

@@ -4,8 +4,8 @@ import {
   getClinicById,
   getSubmissionsByClinic,
   createSubmission,
-} from "@/lib/dataStore";
-import { auth } from "@/lib/auth";
+} from "@/lib/supabaseDataStore";
+import { getCurrentUser } from "@/lib/supabaseAuth";
 
 // GET /api/clinics/[clinicId]/submissions - Get all submissions for a clinic (auth required)
 export async function GET(
@@ -13,22 +13,22 @@ export async function GET(
   { params }: { params: Promise<{ clinicId: string }> }
 ) {
   try {
-    const session = await auth();
+    const user = await getCurrentUser();
     
-    if (!session?.user?.id) {
+    if (!user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const { clinicId } = await params;
-    const clinic = getClinicByIdForUser(clinicId, session.user.id);
+    const clinic = await getClinicByIdForUser(clinicId, user.id);
 
     if (!clinic) {
       return NextResponse.json({ error: "Clinic not found" }, { status: 404 });
     }
 
-    const submissions = getSubmissionsByClinic(clinicId);
+    const submissions = await getSubmissionsByClinic(clinicId);
 
-    // Sort by most recent first
+    // Sort by most recent first (already sorted in query, but keeping for safety)
     const sorted = [...submissions].sort(
       (a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()
     );
@@ -50,7 +50,7 @@ export async function POST(
   try {
     // Note: This is public - patients don't need to be authenticated
     // But the clinic must exist
-    const clinic = getClinicById(clinicId);
+    const clinic = await getClinicById(clinicId);
 
     if (!clinic) {
       return NextResponse.json({ error: "Clinic not found" }, { status: 404 });
@@ -72,7 +72,7 @@ export async function POST(
       );
     }
 
-    const submission = createSubmission(
+    const submission = await createSubmission(
       clinicId,
       patientName.trim(),
       patientEmail?.trim(),

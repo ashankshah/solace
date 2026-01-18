@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useSession } from "next-auth/react";
+import { useSupabaseAuth } from "@/components/SupabaseAuthProvider";
 import { useRouter } from "next/navigation";
 import { LayoutBuilder } from "@/components/LayoutBuilder";
 import {
@@ -13,7 +13,7 @@ import { createEmptyLayout } from "@/types/layout";
 import type { ClinicLayout } from "@/types/layout";
 
 export default function SetupPage() {
-  const { data: session, status } = useSession();
+  const { user, isLoading } = useSupabaseAuth();
   const router = useRouter();
   const [layout, setLayout] = useState<ClinicLayout>(createEmptyLayout());
   const [saving, setSaving] = useState(false);
@@ -21,10 +21,10 @@ export default function SetupPage() {
 
   // Redirect if not authenticated
   useEffect(() => {
-    if (status === "unauthenticated") {
+    if (!isLoading && !user) {
       router.push("/login");
     }
-  }, [status, router]);
+  }, [isLoading, user, router]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -50,11 +50,11 @@ export default function SetupPage() {
     router.push("/dashboard");
   };
 
-  if (status === "loading") {
+  if (isLoading) {
     return <PageLoader label="Loading..." />;
   }
 
-  if (status === "unauthenticated") {
+  if (!user) {
     return <PageLoader label="Redirecting to login..." />;
   }
 
@@ -129,7 +129,7 @@ export default function SetupPage() {
               </svg>
             </div>
             <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-100 mb-3">
-              Welcome to Solace, {session?.user?.name}!
+              Welcome to Solace, {user?.user_metadata?.name || user?.email?.split('@')[0]}!
             </h1>
             <p className="text-neutral-600 dark:text-neutral-400 mb-8">
               Your account has been created. Let&apos;s set up your clinic layout to visualize 

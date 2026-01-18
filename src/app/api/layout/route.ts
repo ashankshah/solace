@@ -1,22 +1,22 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
-import { getUserClinicLayout, updateUserClinicLayout } from "@/lib/dataStore";
+import { getCurrentUser } from "@/lib/supabaseAuth";
+import { getUserClinicLayout, updateUserClinicLayout } from "@/lib/supabaseDataStore";
 import { createEmptyLayout } from "@/types/layout";
 import type { ClinicLayout } from "@/types/layout";
 
 // GET /api/layout - Get the current user's clinic layout
 export async function GET() {
   try {
-    const session = await auth();
+    const user = await getCurrentUser();
     
-    if (!session?.user?.id) {
+    if (!user?.id) {
       return NextResponse.json(
         { error: "Unauthorized" },
         { status: 401 }
       );
     }
 
-    const layout = getUserClinicLayout(session.user.id);
+    const layout = await getUserClinicLayout(user.id);
     
     // Return empty layout if none exists
     if (!layout) {
@@ -36,9 +36,9 @@ export async function GET() {
 // PUT /api/layout - Update the current user's clinic layout
 export async function PUT(request: Request) {
   try {
-    const session = await auth();
+    const user = await getCurrentUser();
     
-    if (!session?.user?.id) {
+    if (!user?.id) {
       return NextResponse.json(
         { error: "Unauthorized" },
         { status: 401 }
@@ -86,7 +86,7 @@ export async function PUT(request: Request) {
       updatedAt: new Date(),
     };
 
-    const updated = updateUserClinicLayout(session.user.id, layout);
+    const updated = await updateUserClinicLayout(user.id, layout);
     
     if (!updated) {
       return NextResponse.json(

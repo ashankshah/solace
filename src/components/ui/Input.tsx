@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef } from "react";
+import { forwardRef, useId } from "react";
 import { cn } from "@/lib/utils";
 
 interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
@@ -11,7 +11,8 @@ interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
   ({ className, label, error, hint, id, required, ...props }, ref) => {
-    const inputId = id || `input-${Math.random().toString(36).substring(7)}`;
+    const generatedId = useId();
+    const inputId = id || generatedId;
 
     return (
       <div className="w-full">
@@ -65,7 +66,8 @@ interface TextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
   ({ className, label, error, hint, id, required, ...props }, ref) => {
-    const inputId = id || `textarea-${Math.random().toString(36).substring(7)}`;
+    const generatedId = useId();
+    const inputId = id || generatedId;
 
     return (
       <div className="w-full">

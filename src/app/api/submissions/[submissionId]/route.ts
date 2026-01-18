@@ -1,7 +1,6 @@
-import { auth } from "@/lib/auth";
-import { getClinicByIdForUser } from "@/lib/dataStore";
+import { getCurrentUser } from "@/lib/supabaseAuth";
+import { getClinicByIdForUser, getSubmissionById, updateSubmissionStatus } from "@/lib/supabaseDataStore";
 import { NextRequest, NextResponse } from "next/server";
-import { getSubmissionById, updateSubmissionStatus } from "@/lib/dataStore";
 
 // GET /api/submissions/[submissionId] - Get a specific submission (auth required)
 export async function GET(
@@ -9,21 +8,21 @@ export async function GET(
   { params }: { params: Promise<{ submissionId: string }> }
 ) {
   try {
-    const session = await auth();
+    const user = await getCurrentUser();
 
-    if (!session?.user?.id) {
+    if (!user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const { submissionId } = await params;
-    const submission = getSubmissionById(submissionId);
+    const submission = await getSubmissionById(submissionId);
 
     if (!submission) {
       return NextResponse.json({ error: "Submission not found" }, { status: 404 });
     }
 
     // Verify the submission's clinic belongs to the user
-    const clinic = getClinicByIdForUser(submission.clinicId, session.user.id);
+    const clinic = await getClinicByIdForUser(submission.clinicId, user.id);
     if (!clinic) {
       return NextResponse.json({ error: "Submission not found" }, { status: 404 });
     }
@@ -41,21 +40,21 @@ export async function PATCH(
   { params }: { params: Promise<{ submissionId: string }> }
 ) {
   try {
-    const session = await auth();
+    const user = await getCurrentUser();
 
-    if (!session?.user?.id) {
+    if (!user?.id) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const { submissionId } = await params;
-    const submission = getSubmissionById(submissionId);
+    const submission = await getSubmissionById(submissionId);
 
     if (!submission) {
       return NextResponse.json({ error: "Submission not found" }, { status: 404 });
     }
 
     // Verify the submission's clinic belongs to the user
-    const clinic = getClinicByIdForUser(submission.clinicId, session.user.id);
+    const clinic = await getClinicByIdForUser(submission.clinicId, user.id);
     if (!clinic) {
       return NextResponse.json({ error: "Submission not found" }, { status: 404 });
     }
@@ -69,7 +68,7 @@ export async function PATCH(
       );
     }
 
-    const updated = updateSubmissionStatus(submissionId, status);
+    const updated = await updateSubmissionStatus(submissionId, status);
 
     if (!updated) {
       return NextResponse.json({ error: "Submission not found" }, { status: 404 });

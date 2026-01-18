@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
-import { createUser } from "@/lib/dataStore";
+import { createAdminClient } from "@/lib/supabase/server";
 
+// POST /api/auth/signup - Server-side signup endpoint
+// Note: Primary signup is handled client-side via SupabaseAuthProvider.
+// This endpoint can be used for server-side signup if needed.
 export async function POST(request: Request) {
   try {
     const { email, password, name } = await request.json();
@@ -38,20 +41,41 @@ export async function POST(request: Request) {
       );
     }
 
-    const user = await createUser(email, password, name.trim());
+    const supabase = await createAdminClient();
+
+    // Create user with Supabase Auth
+    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true, // Auto-confirm for development
+      user_metadata: {
+        name: name.trim(),
+        full_name: name.trim(),
+      },
+    });
+
+    if (authError) {
+      if (authError.message.includes("already registered")) {
+        return NextResponse.json(
+          { error: "An account with this email already exists" },
+          { status: 409 }
+        );
+      }
+      throw authError;
+    }
 
     return NextResponse.json(
-      { user, message: "Account created successfully" },
+      { 
+        user: {
+          id: authData.user.id,
+          email: authData.user.email,
+          name: name.trim(),
+        }, 
+        message: "Account created successfully" 
+      },
       { status: 201 }
     );
   } catch (error) {
-    if (error instanceof Error && error.message === "Email already registered") {
-      return NextResponse.json(
-        { error: "An account with this email already exists" },
-        { status: 409 }
-      );
-    }
-
     console.error("Signup error:", error);
     return NextResponse.json(
       { error: "Failed to create account" },
