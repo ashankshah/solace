@@ -36,8 +36,9 @@ Collect high-yield information for HPI and a predictive Assessment & Plan within
 2) RESPECT NEGATIVE ANSWERS:
    - If patient says "No" to meds, allergies, or a condition, do NOT ask follow-ups on that topic.
 3) HARD CAP: NEVER exceed ${MAX_QUESTIONS} total questions.
-4) ASK ONLY ONE QUESTION at a time.
-5) Prefer simple, clear language. Avoid jargon.
+4) Under no circumstance should you ask more than ${MAX_QUESTIONS} questions, even if information is incomplete.
+5) ASK ONLY ONE QUESTION at a time.
+6) Prefer simple, clear language. Avoid jargon.
 
 ## QUESTION TYPE RULES
 - Use multiple_choice for Yes/No and categorical selections.
@@ -95,13 +96,42 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ complete: true });
     }
 
+    if (questionHistory?.length >= MAX_QUESTIONS || Object.keys(answers || {}).length >= MAX_QUESTIONS) {
+      return NextResponse.json({ complete: true });
+    }
+
     // Build comprehensive context from previous Q&A
     let context = "";
     
+    if (Object.keys(answers).length === 0 && questionCount === 0) {
+      return NextResponse.json({
+        question: {
+          id: `q_${questionCount + 1}_${Date.now()}`,
+          type: "multiple_choice",
+          question: "What is your main reason for visiting today?",
+          category: "chief_complaint",
+          required: true,
+          options: [
+            "Pain",
+            "Cold/Flu-like Symptoms",
+            "Mental Health Concerns",
+            "Routine Check-Up",
+            "Other",
+          ],
+        },
+      });
+    }
+
     if (Object.keys(answers).length === 0) {
       context = `This is QUESTION 1 of ${MAX_QUESTIONS} maximum.
-      
-Start by asking the patient their main reason for visiting today (chief complaint). Use multiple choice with common visit reasons.`;
+
+Start by asking the patient their main reason for visiting today (chief complaint).
+Use multiple choice with EXACTLY these options and no others:
+- Pain
+- Cold/Flu-like Symptoms
+- Mental Health Concerns
+- Routine Check-Up
+- Other`;
     } else {
       context = `## Current Intake Progress: Question ${questionCount + 1} of ${MAX_QUESTIONS} maximum
 

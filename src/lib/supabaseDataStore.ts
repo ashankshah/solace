@@ -13,7 +13,8 @@ function normalizePatientSummary(raw: unknown): PatientSummary | undefined {
   const summary = raw as Record<string, unknown>;
   const hpi = typeof summary.hpi === "string" ? summary.hpi : undefined;
   const ros = summary.ros;
-  const assessmentPlan = summary.assessment_plan ?? summary.assessmentPlan;
+  const assessmentPlan = summary.assessment_plan ?? summary.assessmentPlan ?? summary.ap;
+  const scientificContext = summary.scientificContext ?? summary.scientific_context;
 
   const normalized: PatientSummary = {
     hpi,
@@ -22,6 +23,7 @@ function normalizePatientSummary(raw: unknown): PatientSummary | undefined {
       typeof assessmentPlan === "string" || Array.isArray(assessmentPlan)
         ? (assessmentPlan as PatientSummary["assessmentPlan"])
         : undefined,
+    scientificContext: typeof scientificContext === "string" ? scientificContext : undefined,
   };
 
   const hasContent = Object.values(normalized).some((value) =>

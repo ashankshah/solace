@@ -480,6 +480,12 @@ export default function ListenPage() {
                   </p>
                   {renderSummaryContent(selectedPatient.summary?.assessmentPlan)}
                 </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider font-semibold text-neutral-400 dark:text-neutral-500 mb-2">
+                    Scientific Context
+                  </p>
+                  {renderSummaryContent(selectedPatient.summary?.scientificContext)}
+                </div>
               </div>
             ) : (
               <div className="text-sm text-neutral-500 dark:text-neutral-400">
