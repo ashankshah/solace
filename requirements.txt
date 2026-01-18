@@ -59,3 +59,8 @@ typing-extensions>=4.9.0
 # pytest>=7.4.0
 # pytest-asyncio>=0.23.0
 # httpx>=0.26.0  # Also used for testing
+
+# ============================================
+# Supabase Integration (community client)
+# ============================================
+supabase-py>=2.0.0
