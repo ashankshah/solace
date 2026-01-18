@@ -344,8 +344,8 @@ export default function DashboardPage() {
                         <p className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
                           Patient Check-in Link
                         </p>
-                        <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1 font-mono truncate">
-                          {typeof window !== "undefined" ? `${window.location.origin}/checkin/${selectedClinic.id}` : `/checkin/${selectedClinic.id}`}
+                        <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
+                          Share this link with patients for digital intake
                         </p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
@@ -366,6 +366,34 @@ export default function DashboardPage() {
                           Open
                         </Button>
                       </div>
+                    </div>
+                  </div>
+
+                  {/* Solace Listen Section */}
+                  <div className="mt-4 p-4 rounded-xl bg-gradient-to-r from-accent-50 to-accent-100/50 dark:from-accent-900/20 dark:to-accent-800/10 border border-accent-200/50 dark:border-accent-700/30">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="min-w-0 flex-1 flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-accent-500 flex items-center justify-center shrink-0">
+                          <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                          </svg>
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-accent-700 dark:text-accent-300">
+                            Solace Listen
+                          </p>
+                          <p className="text-xs text-accent-600/70 dark:text-accent-400/70 mt-0.5">
+                            Record and transcribe patient conversations
+                          </p>
+                        </div>
+                      </div>
+                      <Button 
+                        size="sm" 
+                        onClick={() => router.push(`/listen/${selectedClinic.id}`)}
+                        leftIcon={<ExternalLinkIcon />}
+                      >
+                        Open
+                      </Button>
                     </div>
                   </div>
                 </Card>
